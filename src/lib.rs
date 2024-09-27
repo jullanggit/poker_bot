@@ -9,7 +9,7 @@ use std::{
     io,
     mem::transmute,
     num::{ParseFloatError, ParseIntError},
-    sync::atomic::{self, AtomicU16},
+    sync::atomic::{self, AtomicU32},
 };
 use strum_macros::EnumCount;
 
@@ -109,8 +109,8 @@ impl Hand {
 
 #[derive(Default, Debug)]
 struct WinsLosses {
-    wins: AtomicU16,
-    losses: AtomicU16,
+    wins: AtomicU32,
+    losses: AtomicU32,
 }
 impl WinsLosses {
     fn percentage(self) -> f64 {
@@ -197,9 +197,9 @@ fn get_cards(interactive: bool) -> Result<Vec<Card>, &'static str> {
             .map(|&string| string.try_into())
             .collect()
     } else {
-        let num = thread_rng().gen_range(2..=7);
+        // let num = thread_rng().gen_range(4..=7);
         let mut cards = Vec::new();
-        for _ in 0..num {
+        for _ in 0..5 {
             cards.push(Card::random());
         }
         Ok(cards)
@@ -226,7 +226,7 @@ fn get_pot(interactive: bool) -> Result<f64, ParseFloatError> {
 
         input_buffer.trim_end().parse::<f64>()
     } else {
-        Ok(thread_rng().gen_range(10.0..100000.0))
+        Ok(thread_rng().gen_range(10.0..100_000.0))
     }
 }
 

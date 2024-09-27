@@ -11,7 +11,7 @@ fn benchmark_deck_evaluation(c: &mut Criterion) {
 // Define the Criterion groups and main function
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10);
+    config = Criterion::default().sample_size(200);
     targets = benchmark_deck_evaluation
 }
 criterion_main!(benches);
