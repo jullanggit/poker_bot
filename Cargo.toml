@@ -1,0 +1,24 @@
+cargo-features = ["codegen-backend"]
+[package]
+name = "poker_bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itertools = "0.13.0"
+mimalloc = "0.1.43"
+rand = "0.8.5"
+rayon = "1.10.0"
+strum = "0.26.3"
+strum_macros = "0.26.4"
+[dev-dependencies]
+criterion = "0.5.1"
+[[bench]]
+name = "poker_bot_benchmark"
+harness = false
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
