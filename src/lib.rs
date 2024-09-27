@@ -333,6 +333,7 @@ const fn is_four_of_a_kind(cards: &[&&Card]) -> bool {
         && cards[0].value() == cards[3].value()
 }
 
+// TODO: Make it actually only count if the pair and the three of a kind is seperate
 fn is_full_house(
     cards: &[&Card],
     is_three_of_a_kind_bool: &mut bool,
