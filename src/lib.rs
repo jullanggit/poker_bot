@@ -147,12 +147,13 @@ pub fn calculate(interactive: bool) {
         .combinations(5 - pool.len())
         .par_bridge()
         .for_each(|remaining_pool| {
-            let entire_pool = pool.iter().chain(remaining_pool.iter());
-            let player_combined = entire_pool.clone().chain(player_cards);
+            let entire_pool = pool.iter().cloned().chain(remaining_pool.clone());
+            let player_combined = entire_pool.clone().chain(player_cards.iter().cloned());
             let player_hand = highest_possible_hand(player_combined, None);
             // Calculate win percentage
 
-            deck.iter()
+            deck.clone()
+                .into_iter()
                 // Filter out cards already in the pool
                 .filter(|deck_card| !remaining_pool.contains(deck_card))
                 // Get possible other hand cards
@@ -271,14 +272,14 @@ fn best_bet(win_chance: f64, pot: f64, min_bet: u32, max_bet: u32) -> (u32, f64)
         .unwrap()
 }
 
-fn highest_possible_hand<'a, T>(input_cards: T, player_hand: Option<Hand>) -> Hand
+fn highest_possible_hand<T>(input_cards: T, player_hand: Option<Hand>) -> Hand
 where
-    T: Iterator<Item = &'a Card>,
+    T: Iterator<Item = Card>,
 {
     let mut highest_hand = player_hand.map_or(Hand::HighCard, Hand::lower);
     for mut cards in input_cards.combinations(5) {
         // Sort cards by their position in SEQUENCE
-        cards.sort_by_key(|card| Card::value(card));
+        cards.sort_by_key(Card::value);
 
         let is_straight = is_straight(&cards);
         let is_flush = is_flush(&cards);
@@ -327,7 +328,7 @@ where
     highest_hand
 }
 
-const fn is_four_of_a_kind(cards: &[&&Card]) -> bool {
+const fn is_four_of_a_kind(cards: &[&Card]) -> bool {
     cards[0].value() == cards[1].value()
         && cards[0].value() == cards[2].value()
         && cards[0].value() == cards[3].value()
@@ -335,7 +336,7 @@ const fn is_four_of_a_kind(cards: &[&&Card]) -> bool {
 
 // TODO: Make it actually only count if the pair and the three of a kind is seperate
 fn is_full_house(
-    cards: &[&Card],
+    cards: &[Card],
     is_three_of_a_kind_bool: &mut bool,
     pairs_usize: &mut usize,
 ) -> bool {
@@ -353,14 +354,14 @@ fn is_full_house(
     *is_three_of_a_kind_bool && *pairs_usize > 0 && pair_value != three_of_a_kind_value
 }
 
-const fn is_flush(cards: &[&Card]) -> bool {
+const fn is_flush(cards: &[Card]) -> bool {
     cards[0].color() == cards[1].color()
         && cards[0].color() == cards[2].color()
         && cards[0].color() == cards[3].color()
         && cards[0].color() == cards[4].color()
 }
 
-const fn is_straight(cards: &[&Card]) -> bool {
+const fn is_straight(cards: &[Card]) -> bool {
     // normal case
     (cards[1].value() == cards[0].value() + 1
         && cards[2].value() == cards[0].value() + 2
@@ -374,7 +375,7 @@ const fn is_straight(cards: &[&Card]) -> bool {
             && cards[4].value() == 14)
 }
 
-fn is_three_of_a_kind(cards: &[&&Card], value: &mut u8) -> bool {
+fn is_three_of_a_kind(cards: &[&Card], value: &mut u8) -> bool {
     if cards[0].value() == cards[1].value() && cards[0].value() == cards[2].value() {
         *value = cards[0].value();
         true
@@ -383,7 +384,7 @@ fn is_three_of_a_kind(cards: &[&&Card], value: &mut u8) -> bool {
     }
 }
 
-fn is_pair(cards: &[&&Card], value: &mut u8) -> bool {
+fn is_pair(cards: &[&Card], value: &mut u8) -> bool {
     if cards[0].value() == cards[1].value() {
         *value = cards[0].value();
         true
