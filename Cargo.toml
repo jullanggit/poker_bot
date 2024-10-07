@@ -11,8 +11,11 @@ rand = "0.8.5"
 rayon = "1.10.0"
 strum = "0.26.3"
 strum_macros = "0.26.4"
+
 [dev-dependencies]
 criterion = "0.5.1"
+insta = "1.40.0"
+
 [[bench]]
 name = "poker_bot_benchmark"
 harness = false
