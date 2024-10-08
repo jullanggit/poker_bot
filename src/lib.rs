@@ -410,7 +410,16 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
 
     let mut straight_stuff: StraightStuff = (input_cards[0], flush).into();
     // TODO: See if into_iter is faster
-    for cur_card in input_cards.iter().skip(1) {
+    for cur_card in input_cards
+        .iter()
+        .chain(
+            input_cards
+                .iter()
+                .rev()
+                .take_while(|card| card.value() == CardValue::Ace),
+        )
+        .skip(1)
+    {
         let diff = cur_card.value() as u8 - straight_stuff.end as u8;
         if diff == 0 {
             if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
