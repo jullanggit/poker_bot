@@ -67,6 +67,32 @@ fn test_straight() {
     assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
 }
 #[test]
+fn test_straight_starting_with_ace() {
+    let input_cards = vec![
+        Card::from_num(14, 2),
+        Card::from_num(2, 3),
+        Card::from_num(3, 3),
+        Card::from_num(4, 3),
+        Card::from_num(5, 2),
+        Card::from_num(8, 1),
+        Card::from_num(9, 1),
+    ];
+    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
+}
+#[test]
+fn test_straight_starting_with_ace_at_the_end() {
+    let input_cards = vec![
+        Card::from_num(2, 3),
+        Card::from_num(3, 3),
+        Card::from_num(4, 3),
+        Card::from_num(5, 2),
+        Card::from_num(8, 1),
+        Card::from_num(9, 1),
+        Card::from_num(14, 2),
+    ];
+    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
+}
+#[test]
 fn test_flush() {
     let input_cards = vec![
         Card::from_num(2, 3),
