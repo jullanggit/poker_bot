@@ -28,22 +28,27 @@ pub struct Card {
     // 01 = Diamonds
     // 10 = Clubs
     // 11 = Spades
-    _inner: u8,
+    inner: u8,
 }
 impl Card {
-    pub fn new(value: CardValue, color: Color) -> Self {
+    #[must_use]
+    pub const fn new(value: CardValue, color: Color) -> Self {
         // Safe because of conversion to u8 from valid values
-        unsafe { Self::_from_num_unchecked(value as u8, color as u8) }
+        unsafe { Self::from_num_unchecked(value as u8, color as u8) }
     }
+    /// # Panics
+    /// - If value isnt inside of 2..=14
+    /// - If color isnt inside of 2..=3
+    #[must_use]
     pub fn from_num(value: u8, color: u8) -> Self {
         assert!((2..=14).contains(&value));
         assert!((0..=3).contains(&color));
 
-        unsafe { Self::_from_num_unchecked(value, color) }
+        unsafe { Self::from_num_unchecked(value, color) }
     }
-    unsafe fn _from_num_unchecked(value: u8, color: u8) -> Self {
+    const unsafe fn from_num_unchecked(value: u8, color: u8) -> Self {
         Self {
-            _inner: value + ((color) << 4),
+            inner: value + ((color) << 4),
         }
     }
     fn random() -> Self {
@@ -53,13 +58,13 @@ impl Card {
 
         Self::from_num(value, color)
     }
-    const fn value(&self) -> CardValue {
+    const fn value(self) -> CardValue {
         // Safe because of the manually set discriminants
-        unsafe { transmute(self._inner & 0b0000_1111) }
+        unsafe { transmute(self.inner & 0b0000_1111) }
     }
-    const fn color(&self) -> Color {
+    const fn color(self) -> Color {
         // Safe because of the manually set discriminants
-        unsafe { transmute(self._inner >> 4) }
+        unsafe { transmute(self.inner >> 4) }
     }
 }
 impl TryFrom<&str> for Card {
@@ -117,7 +122,7 @@ impl FromStr for CardValue {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Color {
     Hearts = 0,
     Diamonds = 1,
@@ -161,7 +166,7 @@ impl WinsLosses {
     fn percentage(self) -> f64 {
         let wins = self.wins.load(atomic::Ordering::Acquire);
         let losses = self.losses.load(atomic::Ordering::Acquire);
-        wins as f64 / (wins + losses.max(1)) as f64
+        f64::from(wins) / f64::from(wins + losses.max(1))
     }
 }
 
@@ -192,10 +197,10 @@ pub fn calculate(interactive: bool) {
         .combinations(5 - pool.len())
         .par_bridge()
         .for_each(|remaining_pool| {
-            let entire_pool = pool.iter().cloned().chain(remaining_pool.clone());
+            let entire_pool = pool.iter().copied().chain(remaining_pool.clone());
             let player_combined = entire_pool
                 .clone()
-                .chain(player_cards.iter().cloned())
+                .chain(player_cards.iter().copied())
                 .collect();
             let player_hand = highest_possible_hand(player_combined, None);
             // Calculate win percentage
@@ -316,7 +321,7 @@ fn expected_value(win_chance: f64, pot: f64, bet: f64) -> f64 {
 
 fn best_bet(win_chance: f64, pot: f64, min_bet: u32, max_bet: u32) -> (u32, f64) {
     (min_bet..=max_bet)
-        .map(|bet| (bet, expected_value(win_chance, pot, bet as f64)))
+        .map(|bet| (bet, expected_value(win_chance, pot, f64::from(bet))))
         .max_by(|(_, a_ev), (_, b_ev)| a_ev.total_cmp(b_ev))
         .unwrap()
 }
@@ -329,7 +334,7 @@ struct ColorsCounter {
     spades: u8,
 }
 impl ColorsCounter {
-    fn flush(&self) -> Option<Color> {
+    const fn flush(self) -> Option<Color> {
         if self.hearts >= 5 {
             Some(Color::Hearts)
         } else if self.diamonds >= 5 {
@@ -354,7 +359,7 @@ impl AddAssign<Color> for ColorsCounter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct StraightStuff {
     start: CardValue,
     end: CardValue,
@@ -369,7 +374,7 @@ impl From<(Card, Option<Color>)> for StraightStuff {
         Self {
             start: card.value(),
             end: card.value(),
-            flush_counter: if card_is_flush { 1 } else { 0 },
+            flush_counter: u8::from(card_is_flush),
             flush_end: if card_is_flush {
                 Some(card.value())
             } else {
@@ -380,25 +385,23 @@ impl From<(Card, Option<Color>)> for StraightStuff {
     }
 }
 impl StraightStuff {
-    fn is_straight(&self) -> bool {
+    const fn is_straight(self) -> bool {
         self.end as u8 - self.start as u8 >= 4
     }
-    fn is_flush(&self) -> bool {
+    const fn is_flush(self) -> bool {
         self.flush_counter >= 5
     }
 }
 fn card_is_flush(card: Card, flush_color: Option<Color>) -> bool {
-    match flush_color {
-        Some(flush_color) => card.color() == flush_color,
-        _ => false,
-    }
+    flush_color.map_or(false, |flush_color| card.color() == flush_color)
 }
 
-/// Returns HighCard if no hand >= player_hand is found
+/// Returns `HighCard` if no hand >= `player_hand` is found
+#[must_use]
 pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Hand>) -> Hand {
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
-    input_cards.sort_by_key(Card::value);
+    input_cards.sort_unstable_by_key(|card| card.value());
 
     let flush = input_cards
         .iter()
@@ -440,13 +443,13 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
             // Set unsure because maybe theres another card of the same value but with the right suit
             // Dont set unsure if there already is a straight flush
             } else if straight_stuff.flush_counter < 5 {
-                straight_stuff.unsure = true
+                straight_stuff.unsure = true;
             }
         } else if diff > 1 {
             if straight_stuff.is_straight() {
                 break;
             }
-            straight_stuff = (*cur_card, flush).into()
+            straight_stuff = (*cur_card, flush).into();
         }
     }
     let is_straight = straight_stuff.is_straight();
@@ -493,7 +496,7 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
                         && d.value() == e.value() =>
             {
                 // Cant return because it can still be a four of a kind
-                is_full_house = true
+                is_full_house = true;
             }
             // TODO: See if short-circuiting here is faster (straight & flush and full_house)
             (Some(a), Some(b), Some(c), _, _)
@@ -503,7 +506,7 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
                     && b.value() == c.value() =>
             {
                 // Cant return because it can still be a four of a kind
-                is_three_of_a_kind = true
+                is_three_of_a_kind = true;
             }
             (Some(a), Some(b), _, _, _) if a.value() == b.value() => pairs += 1,
             _ => {}
