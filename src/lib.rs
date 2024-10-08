@@ -375,7 +375,7 @@ impl From<(Card, Option<Color>)> for StraightStuff {
             } else {
                 None
             },
-            unsure: false,
+            unsure: !card_is_flush,
         }
     }
 }
