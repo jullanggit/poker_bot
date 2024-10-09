@@ -1,8 +1,8 @@
-cargo-features = ["codegen-backend"]
+cargo-features = ["codegen-backend", "edition2024"]
 [package]
 name = "poker_bot"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 itertools = "0.13.0"
