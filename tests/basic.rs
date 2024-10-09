@@ -106,6 +106,19 @@ fn test_flush() {
     assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Flush");
 }
 #[test]
+fn test_full_house() {
+    let input_cards = vec![
+        Card::from_num(2, 3),
+        Card::from_num(2, 3),
+        Card::from_num(2, 3),
+        Card::from_num(4, 2),
+        Card::from_num(5, 2),
+        Card::from_num(9, 1),
+        Card::from_num(9, 1),
+    ];
+    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"FullHouse");
+}
+#[test]
 fn test_four_of_a_kind() {
     let input_cards = vec![
         Card::from_num(2, 3),
