@@ -8,6 +8,7 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::{
+    fmt::Display,
     io,
     mem::transmute,
     num::{ParseFloatError, ParseIntError},
@@ -80,6 +81,11 @@ impl TryFrom<&str> for Card {
         let color = card_parts[1].parse()?;
 
         Ok(Self::new(value, color))
+    }
+}
+impl Display for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Color: {:?}, Value: {:?}", self.color(), self.value())
     }
 }
 
@@ -385,8 +391,8 @@ impl From<(Card, Option<Color>)> for StraightStuff {
     }
 }
 impl StraightStuff {
-    const fn is_straight(self) -> bool {
-        self.end as u8 - self.start as u8 >= 4
+    fn is_straight(self) -> bool {
+        diff_considerig_ace(self.end, self.start) >= 4
     }
     const fn is_flush(self) -> bool {
         self.flush_counter >= 5
@@ -395,10 +401,17 @@ impl StraightStuff {
 fn card_is_flush(card: Card, flush_color: Option<Color>) -> bool {
     flush_color.map_or(false, |flush_color| card.color() == flush_color)
 }
+fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
+    (a as u8)
+        .checked_sub(b as u8)
+        // If the previous card was an ace and the current isnt, treat the ace as a 1
+        .unwrap_or(a as u8 - 1)
+}
 
 /// Returns `HighCard` if no hand >= `player_hand` is found
 #[must_use]
 pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Hand>) -> Hand {
+    assert!(input_cards.len() == 7);
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
     input_cards.sort_unstable_by_key(|card| card.value());
@@ -411,19 +424,23 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
         })
         .flush();
 
-    let mut straight_stuff: StraightStuff = (input_cards[0], flush).into();
-    // TODO: See if into_iter is faster
-    for cur_card in input_cards
+    let mut straight_stuff_iter = input_cards
         .iter()
-        .chain(
-            input_cards
-                .iter()
-                .rev()
-                .take_while(|card| card.value() == CardValue::Ace),
-        )
-        .skip(1)
-    {
-        let diff = cur_card.value() as u8 - straight_stuff.end as u8;
+        .rev()
+        .take_while(|card| card.value() == CardValue::Ace)
+        .chain(input_cards.iter());
+
+    let mut straight_stuff: StraightStuff = (
+        *straight_stuff_iter
+            .next()
+            .expect("Iterator always has at least 7 elements"),
+        flush,
+    )
+        .into();
+
+    // TODO: See if into_iter is faster
+    for cur_card in straight_stuff_iter {
+        let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
         if diff == 0 {
             if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
                 straight_stuff.unsure = false;
