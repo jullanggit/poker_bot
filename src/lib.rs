@@ -478,6 +478,7 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
         return Hand::RoyalFlush;
     }
 
+    // Straight Flush
     if is_straight_flush {
         return Hand::StraightFlush;
     }
@@ -485,67 +486,77 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
     if highest_hand > Hand::FourOfAKind {
         return Hand::HighCard;
     }
-    // StraightFlush
-    // Four of a kind, Full house, Three of a kind & pairs
-    let mut pairs = 0;
-    let mut is_full_house = false;
-    let mut is_three_of_a_kind = false;
-    for base_index in 0..=5 {
-        let (a, b, c, d, e) = (
-            input_cards.get(base_index),
-            input_cards.get(base_index + 1),
-            input_cards.get(base_index + 2),
-            input_cards.get(base_index + 3),
-            input_cards.get(base_index + 4),
-        );
-        match (a, b, c, d, e) {
-            (Some(a), Some(b), Some(c), Some(d), _)
-                if a.value() == b.value() && b.value() == c.value() && c.value() == d.value() =>
-            {
-                // Return because this is the highest achievable hand at this point
-                return Hand::FourOfAKind;
-            }
-            // TODO: See if short-circuiting here is faster
-            (Some(a), Some(b), Some(c), Some(d), Some(e))
-                if a.value() == b.value() && b.value() == c.value() && d.value() == e.value()
-                    || a.value() == b.value()
-                        && c.value() == d.value()
-                        && d.value() == e.value() =>
-            {
-                // Cant return because it can still be a four of a kind
-                is_full_house = true;
-            }
-            // TODO: See if short-circuiting here is faster (straight & flush and full_house)
-            (Some(a), Some(b), Some(c), _, _)
-                if !is_straight
-                    && flush.is_none()
-                    && a.value() == b.value()
-                    && b.value() == c.value() =>
-            {
-                // Cant return because it can still be a four of a kind
-                is_three_of_a_kind = true;
-            }
-            (Some(a), Some(b), _, _, _) if a.value() == b.value() => pairs += 1,
-            _ => {}
-        }
+
+    // Four of a Kind
+    if input_cards.iter().tuple_windows().any(|(a, b, c, d)| {
+        let (a, b, c, d) = (a.value(), b.value(), c.value(), d.value());
+        a == b && a == c && a == d
+    }) {
+        return Hand::FourOfAKind;
     }
-    if is_full_house {
+
+    if highest_hand > Hand::FullHouse {
+        return Hand::HighCard;
+    }
+
+    // Up here because necessary for full house
+    let is_three_of_a_kind = input_cards.iter().tuple_windows().any(|(a, b, c)| {
+        let (a, b, c) = (a.value(), b.value(), c.value());
+        a == b && a == c
+    });
+
+    // Up here because necessary for full house
+    let pairs = input_cards
+        .iter()
+        .tuple_windows()
+        .filter(|(a, b)| a == b)
+        .count();
+
+    // Works because four of a kind is already checked for, so one pair is in the three of a kind,
+    // and the other somewhere else -> full house
+    if is_three_of_a_kind && pairs >= 2 {
         return Hand::FullHouse;
     }
+
+    if highest_hand > Hand::Flush {
+        return Hand::HighCard;
+    }
+
+    // Flush
     if flush.is_some() {
         return Hand::Flush;
     }
+
+    if highest_hand > Hand::Straight {
+        return Hand::HighCard;
+    }
+
+    // Straight
     if is_straight {
         return Hand::Straight;
     }
+
+    if highest_hand > Hand::ThreeOfAKind {
+        return Hand::HighCard;
+    }
+
+    // Three of a kind
     if is_three_of_a_kind {
         return Hand::ThreeOfAKind;
     }
+
+    if highest_hand > Hand::TwoPair {
+        return Hand::HighCard;
+    }
+
+    // Two pair
     if pairs >= 2 {
         return Hand::TwoPair;
     }
+
     if pairs == 1 {
         return Hand::Pair;
     }
+
     Hand::HighCard
 }
