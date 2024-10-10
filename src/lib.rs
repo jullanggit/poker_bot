@@ -1,8 +1,11 @@
 #![feature(let_chains)]
+#![feature(portable_simd)]
+#![feature(iter_array_chunks)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use array_macro::array;
 use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
@@ -11,11 +14,14 @@ use std::{
     fmt::Display,
     mem::transmute,
     ops::AddAssign,
+    simd::Simd,
     sync::atomic::{self, AtomicU32},
 };
 use strum_macros::EnumCount;
 
 mod io;
+
+pub const SIMD_LANES: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -150,33 +156,53 @@ pub fn calculate(interactive: bool) {
         .into_iter()
         // Calculate possible pools
         .combinations(5 - pool.len())
+        .array_chunks::<SIMD_LANES>()
         .par_bridge()
-        .for_each(|remaining_pool| {
-            let entire_pool = pool.iter().copied().chain(remaining_pool.clone());
-            let player_combined = entire_pool
+        .for_each(|remaining_pools| {
+            let entire_pools = remaining_pools
+                .iter()
+                .map(|remaining_pool| pool.iter().copied().chain(remaining_pool.clone()));
+            // let entire_pool = pool.iter().copied().chain(remaining_pool.clone());
+            let mut player_combined = entire_pools
                 .clone()
-                .chain(player_cards.iter().copied())
-                .collect();
-            let player_hand = highest_possible_hand(player_combined, None);
+                .map(|entire_pool| {
+                    entire_pool
+                        .chain(player_cards.iter().copied())
+                        .collect_vec()
+                })
+                .collect_vec();
+            let player_hand = highest_possible_hand(&mut player_combined, None);
             // Calculate win percentage
 
-            deck.clone()
-                .into_iter()
-                // Filter out cards already in the pool
-                .filter(|deck_card| !remaining_pool.contains(deck_card))
-                // Get possible other hand cards
-                .combinations(2)
-                .for_each(|other_cards| {
-                    let other_combined = entire_pool.clone().chain(other_cards).collect();
-                    let other_hand = highest_possible_hand(other_combined, Some(player_hand));
+            for (i, remaining_pool) in remaining_pools.iter().enumerate() {
+                deck.clone()
+                    .into_iter()
+                    // Filter out cards already in the pool
+                    .filter(|deck_card| !remaining_pool.contains(deck_card))
+                    // Get possible other hand cards
+                    .combinations(2)
+                    .map(|other_cards| {
+                        entire_pools
+                            .clone()
+                            .nth(i)
+                            .expect("remaining_pools and entire_pools have the same length")
+                            .clone()
+                            .chain(other_cards)
+                            .collect()
+                    })
+                    .array_chunks::<SIMD_LANES>()
+                    .for_each(|mut other_combined| {
+                        let other_hand =
+                            highest_possible_hand(&mut other_combined, Some(player_hand));
 
-                    // Aggregate wins, losses and draws
-                    if player_hand as u8 > other_hand as u8 {
-                        wins_losses.wins.fetch_add(1, atomic::Ordering::Relaxed);
-                    } else {
-                        wins_losses.losses.fetch_add(1, atomic::Ordering::Relaxed);
-                    }
-                });
+                        // Aggregate wins, losses and draws
+                        if player_hand as u8 > other_hand as u8 {
+                            wins_losses.wins.fetch_add(1, atomic::Ordering::Relaxed);
+                        } else {
+                            wins_losses.losses.fetch_add(1, atomic::Ordering::Relaxed);
+                        }
+                    });
+            }
         });
     let win_chance = wins_losses.percentage().powi(player_amount);
 
@@ -286,154 +312,165 @@ fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
 }
 
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
+/// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
-pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Hand>) -> Hand {
-    assert!(input_cards.len() == 7);
+pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> Hand {
+    assert!(input_cardss.len() == SIMD_LANES);
+    assert!(input_cardss
+        .iter()
+        .any(|input_cards| input_cards.len() != 7));
+
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
-    input_cards.sort_unstable_by_key(|card| card.value());
+    input_cardss
+        .iter_mut()
+        .for_each(|input_cards| input_cards.sort_unstable_by_key(|card| card.value()));
 
-    let flush = input_cards
-        .iter()
-        .fold(ColorsCounter::default(), |mut counter, card| {
-            counter += card.color();
-            counter
-        })
-        .flush();
+    let simd_cards: [Simd<u8, SIMD_LANES>; 7] =
+        array![x => array![y => input_cardss[y][x].inner; SIMD_LANES].into();7];
 
-    let mut straight_stuff_iter = input_cards
-        .iter()
-        .rev()
-        .take_while(|card| card.value() == CardValue::Ace)
-        .chain(input_cards.iter());
-
-    let mut straight_stuff: StraightStuff = (
-        *straight_stuff_iter
-            .next()
-            .expect("Iterator always has at least 7 elements"),
-        flush,
-    )
-        .into();
-
-    // TODO: See if into_iter is faster
-    for cur_card in straight_stuff_iter {
-        let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
-        if diff == 0 {
-            if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
-                straight_stuff.unsure = false;
-            }
-        // If the current card is consecutive to the end of the current straight
-        } else if diff == 1 {
-            straight_stuff.end = cur_card.value();
-
-            if straight_stuff.unsure {
-                straight_stuff.flush_counter = 0;
-                straight_stuff.flush_end = None;
-            }
-
-            if card_is_flush(*cur_card, flush) {
-                straight_stuff.flush_counter += 1;
-                straight_stuff.flush_end = Some(cur_card.value());
-            // Set unsure because maybe theres another card of the same value but with the right suit
-            // Dont set unsure if there already is a straight flush
-            } else if straight_stuff.flush_counter < 5 {
-                straight_stuff.unsure = true;
-            }
-        } else if diff > 1 {
-            if straight_stuff.is_straight() {
-                break;
-            }
-            straight_stuff = (*cur_card, flush).into();
-        }
-    }
-    let is_straight = straight_stuff.is_straight();
-
-    let is_straight_flush = is_straight && straight_stuff.is_flush();
-
-    // Royal flush
-    if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
-        return Hand::RoyalFlush;
-    }
-
-    // Straight Flush
-    if is_straight_flush {
-        return Hand::StraightFlush;
-    }
-
-    if highest_hand > Hand::FourOfAKind {
-        return Hand::HighCard;
-    }
-
-    // Four of a Kind
-    if input_cards.iter().tuple_windows().any(|(a, b, c, d)| {
-        let (a, b, c, d) = (a.value(), b.value(), c.value(), d.value());
-        a == b && a == c && a == d
-    }) {
-        return Hand::FourOfAKind;
-    }
-
-    if highest_hand > Hand::FullHouse {
-        return Hand::HighCard;
-    }
-
-    // Up here because necessary for full house
-    let is_three_of_a_kind = input_cards.iter().tuple_windows().any(|(a, b, c)| {
-        let (a, b, c) = (a.value(), b.value(), c.value());
-        a == b && a == c
-    });
-
-    // Up here because necessary for full house
-    let pairs = input_cards
-        .iter()
-        .tuple_windows()
-        .filter(|(a, b)| a == b)
-        .count();
-
-    // Works because four of a kind is already checked for, so one pair is in the three of a kind,
-    // and the other somewhere else -> full house
-    if is_three_of_a_kind && pairs >= 2 {
-        return Hand::FullHouse;
-    }
-
-    if highest_hand > Hand::Flush {
-        return Hand::HighCard;
-    }
-
-    // Flush
-    if flush.is_some() {
-        return Hand::Flush;
-    }
-
-    if highest_hand > Hand::Straight {
-        return Hand::HighCard;
-    }
-
-    // Straight
-    if is_straight {
-        return Hand::Straight;
-    }
-
-    if highest_hand > Hand::ThreeOfAKind {
-        return Hand::HighCard;
-    }
-
-    // Three of a kind
-    if is_three_of_a_kind {
-        return Hand::ThreeOfAKind;
-    }
-
-    if highest_hand > Hand::TwoPair {
-        return Hand::HighCard;
-    }
-
-    // Two pair
-    if pairs >= 2 {
-        return Hand::TwoPair;
-    }
-
-    if pairs == 1 {
-        return Hand::Pair;
-    }
-
+    todo!();
+    // let flush = input_cards
+    //     .iter()
+    //     .fold(ColorsCounter::default(), |mut counter, card| {
+    //         counter += card.color();
+    //         counter
+    //     })
+    //     .flush();
+    //
+    // let mut straight_stuff_iter = input_cards
+    //     .iter()
+    //     .rev()
+    //     .take_while(|card| card.value() == CardValue::Ace)
+    //     .chain(input_cards.iter());
+    //
+    // let mut straight_stuff: StraightStuff = (
+    //     *straight_stuff_iter
+    //         .next()
+    //         .expect("Iterator always has at least 7 elements"),
+    //     flush,
+    // )
+    //     .into();
+    //
+    // // TODO: See if into_iter is faster
+    // for cur_card in straight_stuff_iter {
+    //     let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
+    //     if diff == 0 {
+    //         if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
+    //             straight_stuff.unsure = false;
+    //         }
+    //     // If the current card is consecutive to the end of the current straight
+    //     } else if diff == 1 {
+    //         straight_stuff.end = cur_card.value();
+    //
+    //         if straight_stuff.unsure {
+    //             straight_stuff.flush_counter = 0;
+    //             straight_stuff.flush_end = None;
+    //         }
+    //
+    //         if card_is_flush(*cur_card, flush) {
+    //             straight_stuff.flush_counter += 1;
+    //             straight_stuff.flush_end = Some(cur_card.value());
+    //         // Set unsure because maybe theres another card of the same value but with the right suit
+    //         // Dont set unsure if there already is a straight flush
+    //         } else if straight_stuff.flush_counter < 5 {
+    //             straight_stuff.unsure = true;
+    //         }
+    //     } else if diff > 1 {
+    //         if straight_stuff.is_straight() {
+    //             break;
+    //         }
+    //         straight_stuff = (*cur_card, flush).into();
+    //     }
+    // }
+    // let is_straight = straight_stuff.is_straight();
+    //
+    // let is_straight_flush = is_straight && straight_stuff.is_flush();
+    //
+    // // Royal flush
+    // if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
+    //     return Hand::RoyalFlush;
+    // }
+    //
+    // // Straight Flush
+    // if is_straight_flush {
+    //     return Hand::StraightFlush;
+    // }
+    //
+    // if highest_hand > Hand::FourOfAKind {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Four of a Kind
+    // if input_cards.iter().tuple_windows().any(|(a, b, c, d)| {
+    //     let (a, b, c, d) = (a.value(), b.value(), c.value(), d.value());
+    //     a == b && a == c && a == d
+    // }) {
+    //     return Hand::FourOfAKind;
+    // }
+    //
+    // if highest_hand > Hand::FullHouse {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Up here because necessary for full house
+    // let is_three_of_a_kind = input_cards.iter().tuple_windows().any(|(a, b, c)| {
+    //     let (a, b, c) = (a.value(), b.value(), c.value());
+    //     a == b && a == c
+    // });
+    //
+    // // Up here because necessary for full house
+    // let pairs = input_cards
+    //     .iter()
+    //     .tuple_windows()
+    //     .filter(|(a, b)| a == b)
+    //     .count();
+    //
+    // // Works because four of a kind is already checked for, so one pair is in the three of a kind,
+    // // and the other somewhere else -> full house
+    // if is_three_of_a_kind && pairs >= 2 {
+    //     return Hand::FullHouse;
+    // }
+    //
+    // if highest_hand > Hand::Flush {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Flush
+    // if flush.is_some() {
+    //     return Hand::Flush;
+    // }
+    //
+    // if highest_hand > Hand::Straight {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Straight
+    // if is_straight {
+    //     return Hand::Straight;
+    // }
+    //
+    // if highest_hand > Hand::ThreeOfAKind {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Three of a kind
+    // if is_three_of_a_kind {
+    //     return Hand::ThreeOfAKind;
+    // }
+    //
+    // if highest_hand > Hand::TwoPair {
+    //     return Hand::HighCard;
+    // }
+    //
+    // // Two pair
+    // if pairs >= 2 {
+    //     return Hand::TwoPair;
+    // }
+    //
+    // if pairs == 1 {
+    //     return Hand::Pair;
+    // }
+    //
     Hand::HighCard
 }

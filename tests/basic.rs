@@ -1,159 +1,158 @@
+use array_macro::array;
 use insta::assert_debug_snapshot;
-use poker_bot::{highest_possible_hand, Card};
+use poker_bot::{highest_possible_hand, Card, SIMD_LANES};
 
-#[test]
-fn test_high_card() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(10, 2),
-        Card::from_num(6, 2),
-        Card::from_num(7, 1),
-        Card::from_num(8, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"HighCard");
+macro_rules! hand_test {
+    ($name:ident, $(($value:expr, $suit:expr)),+, $expected_output:literal) => {
+        #[test]
+        fn $name() {
+            let mut input_cards = array![_ => vec![
+                $(Card::from_num($value, $suit)),+
+            ]; SIMD_LANES];
+            assert_debug_snapshot!(highest_possible_hand(&mut input_cards, None), @$expected_output);
+        }
+    };
 }
-#[test]
-fn test_pair() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(10, 2),
-        Card::from_num(10, 2),
-        Card::from_num(7, 1),
-        Card::from_num(8, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Pair");
-}
-#[test]
-fn test_two_pair() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(4, 3),
-        Card::from_num(4, 3),
-        Card::from_num(10, 2),
-        Card::from_num(10, 2),
-        Card::from_num(7, 1),
-        Card::from_num(8, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"TwoPair");
-}
-#[test]
-fn test_three_of_a_kind() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(10, 3),
-        Card::from_num(10, 2),
-        Card::from_num(10, 2),
-        Card::from_num(7, 1),
-        Card::from_num(8, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"ThreeOfAKind");
-}
-#[test]
-fn test_straight() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(5, 2),
-        Card::from_num(6, 2),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
-}
-#[test]
-fn test_straight_starting_with_ace() {
-    let input_cards = vec![
-        Card::from_num(14, 2),
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(5, 2),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
-}
-#[test]
-fn test_straight_starting_with_ace_at_the_end() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(5, 2),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-        Card::from_num(14, 2),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Straight");
-}
-#[test]
-fn test_flush() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(5, 3),
-        Card::from_num(7, 3),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"Flush");
-}
-#[test]
-fn test_full_house() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(2, 3),
-        Card::from_num(2, 3),
-        Card::from_num(4, 2),
-        Card::from_num(5, 2),
-        Card::from_num(9, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"FullHouse");
-}
-#[test]
-fn test_four_of_a_kind() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(4, 3),
-        Card::from_num(4, 3),
-        Card::from_num(4, 2),
-        Card::from_num(4, 2),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"FourOfAKind");
-}
-#[test]
-fn test_straight_flush() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(4, 3),
-        Card::from_num(5, 3),
-        Card::from_num(6, 3),
-        Card::from_num(8, 1),
-        Card::from_num(9, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"StraightFlush");
-}
-#[test]
-fn test_royal_flush() {
-    let input_cards = vec![
-        Card::from_num(2, 3),
-        Card::from_num(3, 3),
-        Card::from_num(10, 1),
-        Card::from_num(11, 1),
-        Card::from_num(12, 1),
-        Card::from_num(13, 1),
-        Card::from_num(14, 1),
-    ];
-    assert_debug_snapshot!(highest_possible_hand(input_cards, None), @"RoyalFlush");
-}
+hand_test!(
+    high_card,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (10, 2),
+    (6, 2),
+    (7, 1),
+    (8, 1),
+    "HighCard"
+);
+
+hand_test!(
+    pair,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (10, 2),
+    (10, 2),
+    (7, 1),
+    (8, 1),
+    "Pair"
+);
+
+hand_test!(
+    two_pair,
+    (2, 3),
+    (4, 3),
+    (4, 3),
+    (10, 2),
+    (10, 2),
+    (7, 1),
+    (8, 1),
+    "TwoPair"
+);
+
+hand_test!(
+    three_of_a_kind,
+    (2, 3),
+    (3, 3),
+    (10, 3),
+    (10, 2),
+    (10, 2),
+    (7, 1),
+    (8, 1),
+    "ThreeOfAKind"
+);
+
+hand_test!(
+    straight,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (5, 2),
+    (6, 2),
+    (8, 1),
+    (9, 1),
+    "Straight"
+);
+
+hand_test!(
+    straight_starting_with_ace,
+    (14, 2),
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (5, 2),
+    (8, 1),
+    (9, 1),
+    "Straight"
+);
+
+hand_test!(
+    straight_starting_with_ace_at_the_end,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (5, 2),
+    (8, 1),
+    (9, 1),
+    (14, 2),
+    "Straight"
+);
+
+hand_test!(
+    flush,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (5, 3),
+    (7, 3),
+    (8, 1),
+    (9, 1),
+    "Flush"
+);
+
+hand_test!(
+    full_house,
+    (2, 3),
+    (2, 3),
+    (2, 3),
+    (4, 2),
+    (5, 2),
+    (9, 1),
+    (9, 1),
+    "FullHouse"
+);
+
+hand_test!(
+    four_of_a_kind,
+    (2, 3),
+    (4, 3),
+    (4, 3),
+    (4, 2),
+    (4, 2),
+    (8, 1),
+    (9, 1),
+    "FourOfAKind"
+);
+
+hand_test!(
+    straight_flush,
+    (2, 3),
+    (3, 3),
+    (4, 3),
+    (5, 3),
+    (6, 3),
+    (8, 1),
+    (9, 1),
+    "StraightFlush"
+);
+
+hand_test!(
+    royal_flush,
+    (2, 3),
+    (3, 3),
+    (10, 1),
+    (11, 1),
+    (12, 1),
+    (13, 1),
+    (14, 1),
+    "RoyalFlush"
+);
