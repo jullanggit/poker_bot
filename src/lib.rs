@@ -431,10 +431,10 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
             .into();
 
         // TODO: See if into_iter is faster
-        for cur_card in straight_stuff_iter {
+        for cur_card in straight_stuff_iter.copied() {
             let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
             if diff == 0 {
-                if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
+                if straight_stuff.unsure && card_is_flush(cur_card, flush) {
                     straight_stuff.unsure = false;
                 }
             // If the current card is consecutive to the end of the current straight
@@ -446,7 +446,7 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
                     straight_stuff.flush_end = None;
                 }
 
-                if card_is_flush(*cur_card, flush) {
+                if card_is_flush(cur_card, flush) {
                     straight_stuff.flush_counter += 1;
                     straight_stuff.flush_end = Some(cur_card.value());
                 // Set unsure because maybe theres another card of the same value but with the right suit
@@ -458,7 +458,7 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
                 if straight_stuff.is_straight() {
                     break;
                 }
-                straight_stuff = (*cur_card, flush).into();
+                straight_stuff = (cur_card, flush).into();
             }
         }
         let is_straight_local = straight_stuff.is_straight();
