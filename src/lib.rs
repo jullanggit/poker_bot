@@ -15,7 +15,7 @@ use seq_macro::seq;
 use std::{
     fmt::Display,
     mem::{Assume, TransmuteFrom},
-    ops::Index,
+    ops::{Index, IndexMut},
     simd::{
         cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd},
         Mask, Simd,
@@ -294,8 +294,14 @@ struct StraightStuff {
     flush_end: Option<CardValue>,
     unsure: bool,
 }
-impl From<(Card, Option<Color>)> for StraightStuff {
-    fn from((card, flush_color): (Card, Option<Color>)) -> Self {
+impl From<(Card, i8)> for StraightStuff {
+    /// Flush_color:
+    ///  0 = No flush
+    /// -1 = Hearts
+    /// -2 = Diamonds
+    /// -3 = Clubs
+    /// -4 = Spades
+    fn from((card, flush_color): (Card, i8)) -> Self {
         let card_is_flush = card_is_flush(card, flush_color);
 
         Self {
@@ -319,8 +325,19 @@ impl StraightStuff {
         self.flush_counter >= 5
     }
 }
-fn card_is_flush(card: Card, flush_color: Option<Color>) -> bool {
-    flush_color.map_or(false, |flush_color| card.color() == flush_color)
+/// Flush_color:
+///  0 = No flush
+/// -1 = Hearts
+/// -2 = Diamonds
+/// -3 = Clubs
+/// -4 = Spades
+fn card_is_flush(card: Card, flush_color: i8) -> bool {
+    match flush_color {
+        0 => false,
+        -4..=-1 => card.color() as i8 == flush_color,
+        // TODO: unreachable_unchecked should be possible
+        _ => unreachable!(),
+    }
 }
 fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
     (a as u8)
@@ -376,68 +393,72 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
         + colors_counters[2].simd_le(flush_threshold).to_int() * i8s::splat(3)
         + colors_counters[3].simd_le(flush_threshold).to_int() * i8s::splat(4);
 
-    // let mut straight_stuff_iter = input_cards
-    //     .iter()
-    //     .rev()
-    //     .take_while(|card| card.value() == CardValue::Ace)
-    //     .chain(input_cards.iter());
-    //
-    // let mut straight_stuff: StraightStuff = (
-    //     *straight_stuff_iter
-    //         .next()
-    //         .expect("Iterator always has at least 7 elements"),
-    //     flush,
-    // )
-    //     .into();
-    //
-    // // TODO: See if into_iter is faster
-    // for cur_card in straight_stuff_iter {
-    //     let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
-    //     if diff == 0 {
-    //         if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
-    //             straight_stuff.unsure = false;
-    //         }
-    //     // If the current card is consecutive to the end of the current straight
-    //     } else if diff == 1 {
-    //         straight_stuff.end = cur_card.value();
-    //
-    //         if straight_stuff.unsure {
-    //             straight_stuff.flush_counter = 0;
-    //             straight_stuff.flush_end = None;
-    //         }
-    //
-    //         if card_is_flush(*cur_card, flush) {
-    //             straight_stuff.flush_counter += 1;
-    //             straight_stuff.flush_end = Some(cur_card.value());
-    //         // Set unsure because maybe theres another card of the same value but with the right suit
-    //         // Dont set unsure if there already is a straight flush
-    //         } else if straight_stuff.flush_counter < 5 {
-    //             straight_stuff.unsure = true;
-    //         }
-    //     } else if diff > 1 {
-    //         if straight_stuff.is_straight() {
-    //             break;
-    //         }
-    //         straight_stuff = (*cur_card, flush).into();
-    //     }
-    // }
-    // let is_straight = straight_stuff.is_straight();
-    //
-    // let is_straight_flush = is_straight && straight_stuff.is_flush();
-    //
-    // // Royal flush
-    // if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
-    //     return Hand::RoyalFlush;
-    // }
-    //
-    // // Straight Flush
-    // if is_straight_flush {
-    //     return Hand::StraightFlush;
-    // }
-    //
-    // if highest_hand > Hand::FourOfAKind {
-    //     return Hand::HighCard;
-    // }
+    let mut is_straight: Mask<i8, SIMD_LANES> = Mask::splat(false);
+    for (index, input_cards) in input_cardss.iter().enumerate() {
+        let flush = *flush.index(index);
+
+        let mut straight_stuff_iter = input_cards
+            .iter()
+            .rev()
+            .take_while(|card| card.value() == CardValue::Ace)
+            .chain(input_cards.iter());
+
+        let mut straight_stuff: StraightStuff = (
+            *straight_stuff_iter
+                .next()
+                .expect("Iterator always has at least 7 elements"),
+            flush,
+        )
+            .into();
+
+        // TODO: See if into_iter is faster
+        for cur_card in straight_stuff_iter {
+            let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
+            if diff == 0 {
+                if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
+                    straight_stuff.unsure = false;
+                }
+            // If the current card is consecutive to the end of the current straight
+            } else if diff == 1 {
+                straight_stuff.end = cur_card.value();
+
+                if straight_stuff.unsure {
+                    straight_stuff.flush_counter = 0;
+                    straight_stuff.flush_end = None;
+                }
+
+                if card_is_flush(*cur_card, flush) {
+                    straight_stuff.flush_counter += 1;
+                    straight_stuff.flush_end = Some(cur_card.value());
+                // Set unsure because maybe theres another card of the same value but with the right suit
+                // Dont set unsure if there already is a straight flush
+                } else if straight_stuff.flush_counter < 5 {
+                    straight_stuff.unsure = true;
+                }
+            } else if diff > 1 {
+                if straight_stuff.is_straight() {
+                    break;
+                }
+                straight_stuff = (*cur_card, flush).into();
+            }
+        }
+        let is_straight_inner = straight_stuff.is_straight();
+
+        // TODO: set_unchecked should be possible
+        is_straight.set(index, true);
+
+        let is_straight_flush = is_straight_inner && straight_stuff.is_flush();
+
+        // Royal flush
+        if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
+            // No .min() necessary because RoyalFlush is the best possible hand
+            *final_hand.index_mut(index) = -(Hand::RoyalFlush as i8)
+        // Straight Flush
+        } else if is_straight_flush {
+            // Also, no .min() necessary because straight flush is the best possible hand at this point
+            *final_hand.index_mut(index) = -(Hand::StraightFlush as i8)
+        }
+    }
 
     // Four of a Kind
     // TODO: See if using a .to_bitmask is better
