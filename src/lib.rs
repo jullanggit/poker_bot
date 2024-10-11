@@ -17,7 +17,7 @@ use std::{
     mem::{Assume, TransmuteFrom},
     ops::Index,
     simd::{
-        cmp::{SimdPartialEq, SimdPartialOrd},
+        cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd},
         Mask, Simd,
     },
     sync::atomic::{self, AtomicU32},
@@ -365,15 +365,16 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
         });
     });
 
+    let flush_threshold = i8s::splat(-5);
     // 0 = No flush
     // -1 = Hearts
     // -2 = Diamonds
     // -3 = Clubs
     // -4 = Spades
-    let flush = colors_counters[0].simd_le(i8s::splat(-5)).to_int()
-        + colors_counters[1].simd_le(i8s::splat(-5)).to_int() * i8s::splat(2)
-        + colors_counters[2].simd_le(i8s::splat(-5)).to_int() * i8s::splat(3)
-        + colors_counters[3].simd_le(i8s::splat(-5)).to_int() * i8s::splat(4);
+    let flush = colors_counters[0].simd_le(flush_threshold).to_int()
+        + colors_counters[1].simd_le(flush_threshold).to_int() * i8s::splat(2)
+        + colors_counters[2].simd_le(flush_threshold).to_int() * i8s::splat(3)
+        + colors_counters[3].simd_le(flush_threshold).to_int() * i8s::splat(4);
 
     // let mut straight_stuff_iter = input_cards
     //     .iter()
@@ -447,10 +448,10 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
             mask | (a.simd_eq(*b) & a.simd_eq(*c) & a.simd_eq(*d))
         });
 
-    final_hand += (final_hand.simd_eq(i8s::splat(0)) & is_four_of_a_kind).to_int()
-        * i8s::splat(Hand::FourOfAKind as i8);
+    final_hand =
+        final_hand.simd_min(is_four_of_a_kind.to_int() * i8s::splat(Hand::FourOfAKind as i8));
 
-    if highest_hand > Hand::FourOfAKind {
+    if highest_hand >= Hand::FourOfAKind {
         return final_hand;
     }
 
@@ -464,7 +465,7 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
         });
 
     // Up here because necessary for full house
-    // 2 pairs = -2
+    // Values inverted (2 pairs => -2)
     let pairs = simd_valuess
         .iter()
         .tuple_windows()
@@ -475,15 +476,20 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
     // TODO: See if using a .to_bitmask is better
     let is_full_house = is_three_of_a_kind & pairs.simd_le(i8s::splat(-3));
 
-    // if highest_hand > Hand::Flush {
-    //     return Hand::HighCard;
-    // }
-    //
-    // // Flush
-    // if flush.is_some() {
-    //     return Hand::Flush;
-    // }
-    //
+    final_hand = final_hand.simd_min(is_full_house.to_int() * i8s::splat(Hand::FullHouse as i8));
+
+    if highest_hand >= Hand::FullHouse {
+        return final_hand;
+    }
+
+    // Flush
+    final_hand =
+        final_hand.simd_min(flush.simd_ne(i8s::splat(0)).to_int() * i8s::splat(Hand::Flush as i8));
+
+    if highest_hand >= Hand::Flush {
+        return final_hand;
+    }
+
     // if highest_hand > Hand::Straight {
     //     return Hand::HighCard;
     // }
@@ -492,28 +498,26 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
     // if is_straight {
     //     return Hand::Straight;
     // }
-    //
-    // if highest_hand > Hand::ThreeOfAKind {
-    //     return Hand::HighCard;
-    // }
-    //
-    // // Three of a kind
-    // if is_three_of_a_kind {
-    //     return Hand::ThreeOfAKind;
-    // }
-    //
-    // if highest_hand > Hand::TwoPair {
-    //     return Hand::HighCard;
-    // }
-    //
-    // // Two pair
-    // if pairs >= 2 {
-    //     return Hand::TwoPair;
-    // }
-    //
-    // if pairs == 1 {
-    //     return Hand::Pair;
-    // }
+
+    // Three of a kind
+    final_hand =
+        final_hand.simd_min(is_three_of_a_kind.to_int() * i8s::splat(Hand::ThreeOfAKind as i8));
+
+    if highest_hand >= Hand::ThreeOfAKind {
+        return final_hand;
+    }
+
+    // Two pair
+    final_hand = final_hand
+        .simd_min(pairs.simd_le(i8s::splat(-2)).to_int() * i8s::splat(Hand::TwoPair as i8));
+
+    if highest_hand >= Hand::TwoPair {
+        return final_hand;
+    }
+
+    // Pair
+    final_hand =
+        final_hand.simd_min(pairs.simd_eq(i8s::splat(-1)).to_int() * i8s::splat(Hand::Pair as i8));
 
     final_hand
 }
