@@ -95,7 +95,7 @@ impl Card {
 }
 impl Display for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Color: {:?}, Value: {:?}", self.color(), self.value())
+        write!(f, "{:?}, {:?}", self.color(), self.value())
     }
 }
 
@@ -334,7 +334,7 @@ impl StraightStuff {
 fn card_is_flush(card: Card, flush_color: i8) -> bool {
     match flush_color {
         0 => false,
-        -4..=-1 => card.color() as i8 == flush_color,
+        -4..=-1 => card.color() as i8 == -(flush_color + 1),
         // TODO: unreachable_unchecked should be possible
         _ => unreachable!(),
     }
@@ -442,12 +442,14 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
                 straight_stuff = (*cur_card, flush).into();
             }
         }
-        let is_straight_inner = straight_stuff.is_straight();
+        let is_straight_local = straight_stuff.is_straight();
 
-        // TODO: set_unchecked should be possible
-        is_straight.set(index, true);
+        if is_straight_local {
+            // TODO: set_unchecked should be possible
+            is_straight.set(index, true);
+        }
 
-        let is_straight_flush = is_straight_inner && straight_stuff.is_flush();
+        let is_straight_flush = is_straight_local && straight_stuff.is_flush();
 
         // Royal flush
         if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
@@ -511,14 +513,12 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
         return final_hand;
     }
 
-    // if highest_hand > Hand::Straight {
-    //     return Hand::HighCard;
-    // }
-    //
-    // // Straight
-    // if is_straight {
-    //     return Hand::Straight;
-    // }
+    // Straight
+    final_hand = final_hand.simd_min(is_straight.to_int() * i8s::splat(Hand::Straight as i8));
+
+    if highest_hand >= Hand::Straight {
+        return final_hand;
+    }
 
     // Three of a kind
     final_hand =
