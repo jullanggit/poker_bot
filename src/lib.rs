@@ -117,11 +117,45 @@ pub enum CardValue {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum Color {
     Hearts = 0,
     Diamonds = 1,
     Clubs = 2,
     Spades = 3,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(i8)]
+pub enum OptInvertedColor {
+    None = 0,
+    Hearts = -1,
+    Diamonds = -2,
+    Clubs = -3,
+    Spades = -4,
+}
+impl OptInvertedColor {
+    fn from_i8(num: i8) -> Self {
+        assert!((-4..=0).contains(&num));
+        // Validity guaranteed by the above assertion
+        unsafe { Self::from_i8_unchecked(num) }
+    }
+    /// Caller must guarantee that the i8 contains a bit-valid OptInvertedColor
+    unsafe fn from_i8_unchecked(num: i8) -> Self {
+        // Safety guaranteed because InvertedColor doesnt have any special invariants
+        // Validity guaranteed by caller
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num) }
+    }
+}
+impl From<Color> for OptInvertedColor {
+    fn from(value: Color) -> Self {
+        match value {
+            Color::Hearts => Self::Hearts,
+            Color::Diamonds => Self::Diamonds,
+            Color::Clubs => Self::Clubs,
+            Color::Spades => Self::Spades,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy, EnumCount)]
@@ -294,14 +328,8 @@ struct StraightStuff {
     flush_end: Option<CardValue>,
     unsure: bool,
 }
-impl From<(Card, i8)> for StraightStuff {
-    /// Flush_color:
-    ///  0 = No flush
-    /// -1 = Hearts
-    /// -2 = Diamonds
-    /// -3 = Clubs
-    /// -4 = Spades
-    fn from((card, flush_color): (Card, i8)) -> Self {
+impl From<(Card, OptInvertedColor)> for StraightStuff {
+    fn from((card, flush_color): (Card, OptInvertedColor)) -> Self {
         let card_is_flush = card_is_flush(card, flush_color);
 
         Self {
@@ -325,18 +353,10 @@ impl StraightStuff {
         self.flush_counter >= 5
     }
 }
-/// Flush_color:
-///  0 = No flush
-/// -1 = Hearts
-/// -2 = Diamonds
-/// -3 = Clubs
-/// -4 = Spades
-fn card_is_flush(card: Card, flush_color: i8) -> bool {
+fn card_is_flush(card: Card, flush_color: OptInvertedColor) -> bool {
     match flush_color {
-        0 => false,
-        -4..=-1 => card.color() as i8 == -(flush_color + 1),
-        // TODO: unreachable_unchecked should be possible
-        _ => unreachable!(),
+        OptInvertedColor::None => false,
+        _ => flush_color == card.color().into(),
     }
 }
 fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
@@ -350,8 +370,8 @@ fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
 /// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
 pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
-    assert!(input_cardss.len() == SIMD_LANES);
-    assert!(input_cardss
+    debug_assert!(input_cardss.len() == SIMD_LANES);
+    debug_assert!(input_cardss
         .iter()
         .all(|input_cards| input_cards.len() == 7));
 
@@ -383,19 +403,18 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
     });
 
     let flush_threshold = i8s::splat(-5);
-    // 0 = No flush
-    // -1 = Hearts
-    // -2 = Diamonds
-    // -3 = Clubs
-    // -4 = Spades
-    let flush = colors_counters[0].simd_le(flush_threshold).to_int()
-        + colors_counters[1].simd_le(flush_threshold).to_int() * i8s::splat(2)
-        + colors_counters[2].simd_le(flush_threshold).to_int() * i8s::splat(3)
-        + colors_counters[3].simd_le(flush_threshold).to_int() * i8s::splat(4);
+    let flush: i8s = (0..4)
+        .map(|i| {
+            colors_counters[i as usize]
+                .simd_le(flush_threshold)
+                .to_int()
+                * i8s::splat(i + 1)
+        })
+        .sum();
 
     let mut is_straight: Mask<i8, SIMD_LANES> = Mask::splat(false);
     for (index, input_cards) in input_cardss.iter().enumerate() {
-        let flush = *flush.index(index);
+        let flush = OptInvertedColor::from_i8(*flush.index(index));
 
         let mut straight_stuff_iter = input_cards
             .iter()
