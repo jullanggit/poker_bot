@@ -1,10 +1,24 @@
+use array_macro::array;
 use criterion::{criterion_group, criterion_main, Criterion};
-use poker_bot::calculate;
+use poker_bot::{calculate, highest_possible_hand, Card, Hand, SIMD_LANES};
 
-// Define the benchmark function
-fn benchmark_deck_evaluation(c: &mut Criterion) {
-    c.bench_function("deck_evaluation", |b| {
+fn bench_calculate(c: &mut Criterion) {
+    c.bench_function("calculate", |b| {
         b.iter(|| calculate(false));
+    });
+}
+fn bench_highest_possible_hand(c: &mut Criterion) {
+    c.bench_function("highest_possible_hand", |b| {
+        b.iter(|| {
+            let mut input_cardss = array![_ => vec!(Card::random(), 
+                Card::random(),
+                Card::random(),
+                Card::random(),
+                Card::random(),
+                Card::random()
+                );SIMD_LANES];
+            highest_possible_hand(&mut input_cardss, Some(Hand::random()))
+        });
     });
 }
 
@@ -12,6 +26,6 @@ fn benchmark_deck_evaluation(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(200);
-    targets = benchmark_deck_evaluation
+    targets = bench_calculate, bench_highest_possible_hand
 }
 criterion_main!(benches);
