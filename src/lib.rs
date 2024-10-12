@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![feature(transmutability)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -10,6 +11,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::{
     fmt::Display,
     mem::transmute,
+    mem::{Assume, TransmuteFrom},
     ops::AddAssign,
     sync::atomic::{self, AtomicU32},
 };
@@ -51,7 +53,7 @@ impl Card {
             inner: value + ((color) << 4),
         }
     }
-    fn random() -> Self {
+    pub fn random() -> Self {
         let mut rng = thread_rng();
         let value = rng.gen_range(2..=14);
         let color = rng.gen_range(0..=3);
@@ -110,6 +112,26 @@ pub enum Hand {
     TwoPair = 2,
     Pair = 1,
     HighCard = 0,
+}
+impl Hand {
+    /// Converts an inverted Hand value (from highest_possible_hand), for example -8
+    /// # Safety
+    /// Caller must ensure validity of passed num (must be in -9..0)
+    pub unsafe fn from_inverted(num: i8) -> Self {
+        // Safe because Hand doesnt have any special invariants
+        // Validity ensured by caller
+        unsafe {
+            TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num.abs())
+        }
+    }
+
+    pub fn random() -> Self {
+        let mut rng = thread_rng();
+        let value = rng.gen_range(0..=9);
+
+        // Validity guaranteed because of above range bounds
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(value) }
+    }
 }
 
 #[derive(Default, Debug)]
