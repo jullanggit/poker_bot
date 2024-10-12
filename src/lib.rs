@@ -9,7 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use array_macro::array;
 use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use seq_macro::seq;
 use std::{
@@ -17,8 +17,8 @@ use std::{
     mem::{Assume, TransmuteFrom},
     ops::{Index, IndexMut},
     simd::{
-        cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd},
         Mask, Simd,
+        cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd},
     },
     sync::atomic::{self, AtomicU32},
 };
@@ -69,7 +69,7 @@ impl Card {
             inner: value + ((color) << 4),
         }
     }
-    fn random() -> Self {
+    pub fn random() -> Self {
         let mut rng = thread_rng();
         let value = rng.gen_range(2..=14);
         let color = rng.gen_range(0..=3);
@@ -181,6 +181,14 @@ impl Hand {
         unsafe {
             TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num.abs())
         }
+    }
+
+    pub fn random() -> Self {
+        let mut rng = thread_rng();
+        let value = rng.gen_range(0..=9);
+
+        // Validity guaranteed because of above range bounds
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(value) }
     }
 }
 
@@ -371,9 +379,11 @@ fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
 #[must_use]
 pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
     debug_assert!(input_cardss.len() == SIMD_LANES);
-    debug_assert!(input_cardss
-        .iter()
-        .all(|input_cards| input_cards.len() == 7));
+    debug_assert!(
+        input_cardss
+            .iter()
+            .all(|input_cards| input_cards.len() == 7)
+    );
 
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 

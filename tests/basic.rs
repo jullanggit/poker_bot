@@ -2,7 +2,7 @@
 
 use array_macro::array;
 use insta::assert_debug_snapshot;
-use poker_bot::{highest_possible_hand, Card, Hand, SIMD_LANES};
+use poker_bot::{Card, Hand, SIMD_LANES, highest_possible_hand};
 use std::ops::Index;
 
 macro_rules! hand_test {

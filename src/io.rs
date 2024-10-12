@@ -1,5 +1,5 @@
 use crate::{Card, CardValue, Color};
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use std::{
     io,
     num::{ParseFloatError, ParseIntError},
@@ -62,7 +62,9 @@ impl FromStr for Color {
 pub fn get_cards(interactive: bool) -> Result<Vec<Card>, &'static str> {
     if interactive {
         // get input for cards
-        println!("Please input your handcards and the cards in the middle in the following format, separated by whitespace: Value,Color");
+        println!(
+            "Please input your handcards and the cards in the middle in the following format, separated by whitespace: Value,Color"
+        );
         let mut hand_buffer = String::new();
         let _ = io::stdin().read_line(&mut hand_buffer);
 
