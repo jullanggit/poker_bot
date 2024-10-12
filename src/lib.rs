@@ -9,7 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use array_macro::array;
 use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use seq_macro::seq;
 use std::{
@@ -17,12 +17,11 @@ use std::{
     mem::{Assume, TransmuteFrom},
     ops::{Index, IndexMut},
     simd::{
-        Mask, Simd,
         cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd},
+        Mask, Simd,
     },
     sync::atomic::{self, AtomicU32},
 };
-use strum_macros::EnumCount;
 
 mod io;
 
@@ -158,7 +157,7 @@ impl From<Color> for OptInvertedColor {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy, EnumCount)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy)]
 pub enum Hand {
     RoyalFlush = 9,
     StraightFlush = 8,
@@ -379,11 +378,9 @@ fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
 #[must_use]
 pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
     debug_assert!(input_cardss.len() == SIMD_LANES);
-    debug_assert!(
-        input_cardss
-            .iter()
-            .all(|input_cards| input_cards.len() == 7)
-    );
+    debug_assert!(input_cardss
+        .iter()
+        .all(|input_cards| input_cards.len() == 7));
 
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
