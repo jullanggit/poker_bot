@@ -377,8 +377,8 @@ fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
 /// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
 pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
-    debug_assert!(input_cardss.len() == SIMD_LANES);
-    debug_assert!(input_cardss
+    assert!(input_cardss.len() == SIMD_LANES);
+    assert!(input_cardss
         .iter()
         .all(|input_cards| input_cards.len() == 7));
 
