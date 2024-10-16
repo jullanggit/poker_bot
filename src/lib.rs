@@ -229,6 +229,7 @@ pub fn calculate(interactive: bool) {
         .into_iter()
         // Calculate possible pools
         .combinations(5 - pool.len())
+        // TODO: Handle remainder
         .array_chunks::<SIMD_LANES>()
         .par_bridge()
         .for_each(|remaining_pools| {
@@ -263,6 +264,7 @@ pub fn calculate(interactive: bool) {
                             .chain(other_cards)
                             .collect()
                     })
+                    // TODO: Handle remainder
                     .array_chunks::<SIMD_LANES>()
                     .for_each(|mut other_combined| {
                         let player_hand_i8 = player_hands.index(i);
