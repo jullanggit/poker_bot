@@ -193,6 +193,20 @@ impl Hand {
         // Validity guaranteed because of above range bounds
         unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(value) }
     }
+    // TODO: Maybe get this to work
+    // /// Bitmask format:
+    // /// 0 = HighCard
+    // /// ... = 1 >> (self as u8 - 1)
+    // /// TwoPair but not pair = RoyalFlush
+    // pub fn to_bitmask(self) -> u8 {
+    //     let two_pair = 1 >> (Hand::TwoPair as u8 - 1);
+    //     match self {
+    //         Hand::RoyalFlush => two_pair,
+    //         Hand::TwoPair => two_pair | Hand::to_bitmask(Hand::Pair),
+    //         Hand::HighCard => 0,
+    //         other => 1 >> (other as u8 - 1),
+    //     }
+    // }
 }
 
 #[derive(Default, Debug)]
