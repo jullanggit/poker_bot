@@ -75,6 +75,7 @@ impl Card {
 
         Self::from_num(value, color)
     }
+    #[inline(always)]
     fn value(self) -> CardValue {
         // Safe because CardValue doesnt have any special invariants
         // Valid because Card always contains a valid CardValue
@@ -84,6 +85,7 @@ impl Card {
             )
         }
     }
+    #[inline(always)]
     fn color(self) -> Color {
         // Safe because Color doesnt have any special invariants
         // Valid because Card always contains a valid Color
@@ -134,11 +136,13 @@ pub enum OptInvertedColor {
     Spades = -4,
 }
 impl OptInvertedColor {
+    #[inline]
     fn from_i8(num: i8) -> Self {
         assert!((-4..=0).contains(&num));
         // Validity guaranteed by the above assertion
         unsafe { Self::from_i8_unchecked(num) }
     }
+    #[inline]
     /// Caller must guarantee that the i8 contains a bit-valid OptInvertedColor
     unsafe fn from_i8_unchecked(num: i8) -> Self {
         // Safety guaranteed because InvertedColor doesnt have any special invariants
@@ -171,7 +175,7 @@ pub enum Hand {
     HighCard = 0,
 }
 impl Hand {
-    /// Converts an inverted Hand value (from highest_possible_hand), for example -8
+    /// Converts an inverted Hand value (from `highest_possible_hand`), for example -8
     /// # Safety
     /// Caller must ensure validity of passed num (must be in -9..0)
     pub unsafe fn from_inverted(num: i8) -> Self {
@@ -338,6 +342,7 @@ struct StraightStuff {
     unsure: bool,
 }
 impl From<(Card, OptInvertedColor)> for StraightStuff {
+    #[inline]
     fn from((card, flush_color): (Card, OptInvertedColor)) -> Self {
         let card_is_flush = card_is_flush(card, flush_color);
 
@@ -355,19 +360,23 @@ impl From<(Card, OptInvertedColor)> for StraightStuff {
     }
 }
 impl StraightStuff {
+    #[inline]
     fn is_straight(self) -> bool {
         diff_considerig_ace(self.end, self.start) >= 4
     }
+    #[inline]
     const fn is_flush(self) -> bool {
         self.flush_counter >= 5
     }
 }
+#[inline]
 fn card_is_flush(card: Card, flush_color: OptInvertedColor) -> bool {
     match flush_color {
         OptInvertedColor::None => false,
         _ => flush_color == card.color().into(),
     }
 }
+#[inline(always)]
 fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
     (a as u8)
         .checked_sub(b as u8)
