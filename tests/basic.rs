@@ -1,18 +1,22 @@
 #![feature(portable_simd)]
 
-use array_macro::array;
 use insta::assert_debug_snapshot;
-use poker_bot::{Card, Hand, SIMD_LANES, highest_possible_hand};
-use std::ops::Index;
+use poker_bot::{
+    simd::{simd_highest_possible_hand, SIMD_LANES},
+    Card, Hand,
+};
+use std::{array, ops::Index};
 
 macro_rules! hand_test {
     ($name:ident, $(($value:expr, $suit:expr)),+, $expected_output:literal) => {
         #[test]
         fn $name() {
-            let mut input_cards = array![_ => vec![
-                $(Card::from_num($value, $suit)),+
-            ]; SIMD_LANES];
-            let highest_possible_hands = highest_possible_hand(&mut input_cards, None);
+            let mut input_cards: [Vec<Card>; SIMD_LANES] = array::from_fn(|_| {
+                vec![
+                    $(Card::from_num($value, $suit)),+
+                ]
+            });
+            let highest_possible_hands = simd_highest_possible_hand(&mut input_cards, None);
             let highest_possible_hand = unsafe { Hand::from_inverted(*highest_possible_hands.index(0)) };
             assert_debug_snapshot!(highest_possible_hand, @$expected_output);
         }

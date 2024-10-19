@@ -1,7 +1,10 @@
-use array_macro::array;
 use criterion::{criterion_group, criterion_main, Criterion};
-use poker_bot::{calculate, highest_possible_hand, Card, Hand, SIMD_LANES};
-use seq_macro::seq;
+use poker_bot::{
+    calculate,
+    simd::{simd_highest_possible_hand, SIMD_LANES},
+    Card, Hand,
+};
+use std::array;
 
 fn bench_calculate(c: &mut Criterion) {
     c.bench_function("calculate", |b| {
@@ -11,14 +14,18 @@ fn bench_calculate(c: &mut Criterion) {
 fn bench_highest_possible_hand(c: &mut Criterion) {
     c.bench_function("highest_possible_hand", |b| {
         b.iter(|| {
-            seq!(_ in 0..7 {
-                let mut input_cardss = array![_ => vec!(
-                    #(
-                        Card::random(),
-                    )*
-                ); SIMD_LANES];
+            let mut input_cardss: [Vec<Card>; SIMD_LANES] = array::from_fn(|_| {
+                vec![
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                ]
             });
-            highest_possible_hand(&mut input_cardss, Some(Hand::random()))
+            simd_highest_possible_hand(&mut input_cardss, Some(Hand::random()))
         });
     });
 }

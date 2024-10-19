@@ -5,12 +5,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-array-macro = "2.1.8"
 coz = "0.1.3"
 itertools = "0.13.0"
 mimalloc = "0.1.43"
 rand = "0.8.5"
-seq-macro = "0.3.5"
 
 [dev-dependencies]
 criterion = "0.5.1"
