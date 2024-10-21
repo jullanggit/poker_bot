@@ -2,7 +2,7 @@
 
 use insta::assert_debug_snapshot;
 use poker_bot::{
-    simd::{simd_highest_possible_hand, SIMD_LANES},
+    simd::{self, SIMD_LANES},
     Card, Hand,
 };
 use std::{array, ops::Index};
@@ -16,7 +16,7 @@ macro_rules! hand_test {
                     $(Card::from_num($value, $suit)),+
                 ]
             });
-            let highest_possible_hands = simd_highest_possible_hand(&mut input_cards, None);
+            let highest_possible_hands = simd::highest_possible_hand(&mut input_cards, None);
             let highest_possible_hand = unsafe { Hand::from_inverted(*highest_possible_hands.index(0)) };
             assert_debug_snapshot!(highest_possible_hand, @$expected_output);
         }

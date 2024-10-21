@@ -9,7 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use simd::{i8s, simd_highest_possible_hand, SIMD_LANES};
+use simd::{i8s, SIMD_LANES};
 use std::{
     fmt::Display,
     mem::{Assume, TransmuteFrom},
@@ -153,6 +153,19 @@ impl From<Color> for OptInvertedColor {
         }
     }
 }
+impl From<Option<Color>> for OptInvertedColor {
+    fn from(value: Option<Color>) -> Self {
+        match value {
+            Some(value) => match value {
+                Color::Hearts => Self::Hearts,
+                Color::Diamonds => Self::Diamonds,
+                Color::Clubs => Self::Clubs,
+                Color::Spades => Self::Spades,
+            },
+            None => Self::None,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy)]
 pub enum Hand {
@@ -168,10 +181,17 @@ pub enum Hand {
     HighCard = 0,
 }
 impl Hand {
+    /// Panics if num is not in -9..0
+    pub fn from_inverted(num: i8) -> Self {
+        assert!(num <= -(Hand::HighCard as i8) && num >= -(Hand::RoyalFlush as i8));
+
+        // Valid because of the above assertion
+        unsafe { Self::from_inverted_unchecked(num) }
+    }
     /// Converts an inverted Hand value (from `highest_possible_hand`), for example -8
     /// # Safety
     /// Caller must ensure validity of passed num (must be in -9..0)
-    pub unsafe fn from_inverted(num: i8) -> Self {
+    pub unsafe fn from_inverted_unchecked(num: i8) -> Self {
         // Safe because Hand doesnt have any special invariants
         // Validity ensured by caller
         unsafe {
@@ -212,6 +232,12 @@ impl WinsLosses {
         let wins = self.wins.load(atomic::Ordering::Acquire);
         let losses = self.losses.load(atomic::Ordering::Acquire);
         f64::from(wins) / f64::from(wins + losses.max(1))
+    }
+    fn win(&mut self) {
+        self.wins.fetch_add(1, atomic::Ordering::Relaxed);
+    }
+    fn loss(&mut self) {
+        self.losses.fetch_add(1, atomic::Ordering::Relaxed);
     }
 }
 
@@ -266,86 +292,103 @@ pub fn calculate(interactive: bool) {
                 .skip(index * chunk_size)
                 .take(chunk_size);
             scope.spawn(|| {
-                part
-                    // Guaranteed to not have a remainder because of chunk_size calcculation
+                let chunks = part
                     .array_chunks::<SIMD_LANES>()
-                    .for_each(|remaining_pools| {
-                        let entire_pools = remaining_pools.iter().map(|remaining_pool| {
-                            pool.iter().copied().chain(remaining_pool.clone())
-                        });
-                        // let entire_pool = pool.iter().copied().chain(remaining_pool.clone());
-                        let mut player_combined = entire_pools
-                            .clone()
-                            .map(|entire_pool| {
+                    .map(|remaining_pools| {
+                        (
+                            remaining_pools,
+                            remaining_pools.map(|remaining_pool| {
+                                pool.iter().copied().chain(remaining_pool.clone())
+                            }),
+                        )
+                    })
+                    .map(|(remaining_pools, entire_pools)| {
+                        (
+                            remaining_pools,
+                            entire_pools,
+                            // Player combined
+                            entire_pools.map(|entire_pool| {
                                 entire_pool
                                     .chain(player_cards.iter().copied())
                                     .collect_vec()
-                            })
-                            .collect_vec();
-                        let player_hands = simd_highest_possible_hand(&mut player_combined, None);
+                            }),
+                        )
+                    });
 
-                        for (i, remaining_pool) in remaining_pools.iter().enumerate() {
-                            let other_combineds = deck
-                                .clone()
+                for (remaining_pools, entire_pools, player_combineds) in chunks {
+                    let player_hands_i8 = simd::highest_possible_hand(&mut player_combineds, None);
+                    let player_hands = player_hands_i8
+                        .to_array()
+                        .map(|hand_i8| Hand::from_inverted(hand_i8));
+
+                    for (i, remaining_pool) in remaining_pools.iter().enumerate() {
+                        let other_combineds = deck
+                            .clone()
+                            .into_iter()
+                            // Filter out cards already in the pool
+                            .filter(|deck_card| !remaining_pool.contains(deck_card))
+                            // Get possible other hand cards
+                            .combinations(2)
+                            .map(|other_cards| entire_pools[i].clone().chain(other_cards).collect())
+                            // TODO: Handle remainder
+                            .array_chunks::<SIMD_LANES>();
+
+                        for mut other_combined in other_combineds.clone() {
+                            let other_hand = simd::highest_possible_hand(
+                                &mut other_combined,
+                                Some(player_hands[i]),
+                            );
+
+                            // Aggregate wins, losses and draws
+                            // Less than because the better the hand, the lower the value
+                            // TODO: Consider draws
+                            i8s::splat(player_hands_i8[i])
+                                .simd_lt(other_hand)
+                                .to_array()
                                 .into_iter()
-                                // Filter out cards already in the pool
-                                .filter(|deck_card| !remaining_pool.contains(deck_card))
-                                // Get possible other hand cards
-                                .combinations(2)
-                                .map(|other_cards| {
-                                    entire_pools
-                                        .clone()
-                                        .nth(i)
-                                        .expect(
-                                            "remaining_pools and entire_pools have the same length",
-                                        )
-                                        .clone()
-                                        .chain(other_cards)
-                                        .collect()
-                                })
-                                // TODO: Handle remainder
-                                .array_chunks::<SIMD_LANES>();
-                            for mut other_combined in other_combineds.clone() {
-                                let player_hand_i8 = player_hands.index(i);
-
-                                debug_assert!(
-                                    *player_hand_i8 <= -(Hand::HighCard as i8)
-                                        && *player_hand_i8 >= -(Hand::RoyalFlush as i8)
-                                );
-                                // Valid because values returnes from highest_possible_hand are just
-                                // inverted Hand values, so highest_possible_hand(...).abs() is always a
-                                // valid hand
-                                let player_hand = unsafe { Hand::from_inverted(*player_hand_i8) };
-
-                                let other_hand = simd_highest_possible_hand(
+                                .for_each(|win| {
+                                    if win {
+                                        wins_losses.win();
+                                    } else {
+                                        wins_losses.loss();
+                                    }
+                                });
+                        }
+                        // Handle remainder
+                        // TODO: Maybe also use simd here
+                        if let Some(remainder) = other_combineds.into_remainder() {
+                            for mut other_combined in remainder {
+                                let other_hand = scalar::highest_possible_hand(
                                     &mut other_combined,
-                                    Some(player_hand),
+                                    Some(player_hands[i]),
                                 );
-
-                                // Aggregate wins, losses and draws
-                                // Less than because the better the hand, the lower the value
-                                // TODO: Consider draws
-                                i8s::splat(*player_hand_i8)
-                                    .simd_lt(other_hand)
-                                    .to_array()
-                                    .into_iter()
-                                    .for_each(|win| {
-                                        if win {
-                                            wins_losses
-                                                .wins
-                                                .fetch_add(1, atomic::Ordering::Relaxed);
-                                        } else {
-                                            wins_losses
-                                                .losses
-                                                .fetch_add(1, atomic::Ordering::Relaxed);
-                                        }
-                                    });
-                            }
-                            if let Some(remainder) = other_combineds.into_remainder() {
-                                for other_combined in remainder {}
+                                if player_hands[i] > other_hand {
+                                    wins_losses.win();
+                                } else {
+                                    wins_losses.loss();
+                                }
                             }
                         }
-                    });
+                    }
+                    // Only last thread can have a remainder
+                    if index == THREADS
+                        && let Some(remainder) = chunks.into_remainder()
+                    {
+                        // TODO: Maybe also use simd here
+                        for mut other_combined in remainder {
+                            let other_hand = scalar::highest_possible_hand(
+                                &mut other_combined,
+                                Some(player_hand),
+                            );
+
+                            if other_hand >= player_hand {
+                                wins_losses.wins.fetch_add(1, atomic::Ordering::Relaxed);
+                            } else {
+                                wins_losses.losses.fetch_add(1, atomic::Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
             });
         }
     });

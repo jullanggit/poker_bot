@@ -1,8 +1,47 @@
-use crate::Hand;
+use std::ops::AddAssign;
 
+use itertools::Itertools;
+
+use crate::{
+    common::{card_is_flush, diff_considerig_ace, StraightStuff},
+    Card, CardValue, Color, Hand, OptInvertedColor,
+};
+
+#[derive(Default)]
+struct ColorsCounter {
+    hearts: u8,
+    diamonds: u8,
+    clubs: u8,
+    spades: u8,
+}
+impl ColorsCounter {
+    const fn flush(self) -> Option<Color> {
+        if self.hearts >= 5 {
+            Some(Color::Hearts)
+        } else if self.diamonds >= 5 {
+            Some(Color::Diamonds)
+        } else if self.clubs >= 5 {
+            Some(Color::Clubs)
+        } else if self.spades >= 5 {
+            Some(Color::Spades)
+        } else {
+            None
+        }
+    }
+}
+impl AddAssign<Color> for ColorsCounter {
+    fn add_assign(&mut self, rhs: Color) {
+        match rhs {
+            Color::Hearts => self.hearts += 1,
+            Color::Diamonds => self.diamonds += 1,
+            Color::Clubs => self.clubs += 1,
+            Color::Spades => self.spades += 1,
+        }
+    }
+}
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
 #[must_use]
-pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Hand>) -> Hand {
+pub fn highest_possible_hand(input_cards: &mut [Card], player_hand: Option<Hand>) -> Hand {
     assert!(input_cards.len() == 7);
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
@@ -15,6 +54,7 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
             counter
         })
         .flush();
+    let flush = flush.into();
 
     let mut straight_stuff_iter = input_cards
         .iter()
@@ -115,7 +155,7 @@ pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Han
     }
 
     // Flush
-    if flush.is_some() {
+    if flush != OptInvertedColor::None {
         return Hand::Flush;
     }
 

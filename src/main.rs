@@ -1,7 +1,7 @@
 use std::array;
 
 use poker_bot::{
-    simd::{simd_highest_possible_hand, SIMD_LANES},
+    simd::{self, SIMD_LANES},
     Card, Hand,
 };
 
@@ -18,7 +18,7 @@ fn main() {
                 Card::random(),
             ]
         });
-        let _ = simd_highest_possible_hand(&mut input_cardss, Some(Hand::random()));
+        let _ = simd::highest_possible_hand(&mut input_cardss, Some(Hand::random()));
         // coz::progress!();
     }
 }

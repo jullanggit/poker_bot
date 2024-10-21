@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use poker_bot::{
     calculate,
-    simd::{simd_highest_possible_hand, SIMD_LANES},
+    simd::{self, SIMD_LANES},
     Card, Hand,
 };
 use std::array;
@@ -25,7 +25,7 @@ fn bench_highest_possible_hand(c: &mut Criterion) {
                     Card::random(),
                 ]
             });
-            simd_highest_possible_hand(&mut input_cardss, Some(Hand::random()))
+            simd::highest_possible_hand(&mut input_cardss, Some(Hand::random()))
         });
     });
 }

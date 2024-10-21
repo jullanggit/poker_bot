@@ -23,10 +23,7 @@ pub type i8s = Simd<i8, SIMD_LANES>;
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
 /// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
-pub fn simd_highest_possible_hand(
-    input_cardss: &mut [Vec<Card>],
-    player_hand: Option<Hand>,
-) -> i8s {
+pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
     assert!(input_cardss.len() == SIMD_LANES);
     assert!(input_cardss
         .iter()
