@@ -6,7 +6,6 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use simd::{i8s, SIMD_LANES};
@@ -20,7 +19,7 @@ use std::{
 };
 
 mod common;
-mod io;
+pub mod io;
 mod scalar;
 pub mod simd;
 
@@ -257,21 +256,21 @@ fn num_combinations(n: usize, r: usize) -> usize {
 // chance to the amount of other players. Average these results over every hand to get the
 // final result, do this by keeping track of the current average and the count of chances, the
 // on each iteration add (chance - average chance)/count to the average chance
-pub fn calculate(interactive: bool) {
+pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
     let mut deck = create_deck();
 
-    let present_cards = get_cards(interactive).unwrap();
+    let present_cards = present_cards.unwrap_or_else(|| {
+        // let num = thread_rng().gen_range(4..=7);
+        let mut cards = Vec::with_capacity(5);
+        for _ in 0..5 {
+            cards.push(Card::random());
+        }
+        cards
+    });
 
-    let player_amount = get_player_count(interactive).unwrap();
-    let pot = get_pot(interactive).unwrap();
-    let (min_bet, max_bet) = get_min_max_bet(interactive).unwrap();
-
-    // Remove the present cards from the deck
     deck.retain(|deck_card| !present_cards.contains(deck_card));
 
     let (player_cards, pool) = present_cards.split_at(2);
-
-    let wins_losses = WinsLosses::default();
 
     let combinations = deck
         .clone()
@@ -392,12 +391,8 @@ pub fn calculate(interactive: bool) {
             });
         }
     });
-    let win_chance = wins_losses.percentage().powi(player_amount);
+    wins_losses.percentage()
 
-    if interactive {
-        println!("Win chance: {}%", win_chance * 100.);
-        let (best_bet, ev) = best_bet(win_chance, pot, min_bet, max_bet);
-        println!("Best bet: {best_bet}, ev: {ev}",);
     }
 }
 
@@ -410,15 +405,4 @@ fn create_deck() -> Vec<Card> {
         }
     }
     deck
-}
-
-fn expected_value(win_chance: f64, pot: f64, bet: f64) -> f64 {
-    win_chance.mul_add(pot + bet, -((1. - win_chance) * bet))
-}
-
-fn best_bet(win_chance: f64, pot: f64, min_bet: u32, max_bet: u32) -> (u32, f64) {
-    (min_bet..=max_bet)
-        .map(|bet| (bet, expected_value(win_chance, pot, f64::from(bet))))
-        .max_by(|(_, a_ev), (_, b_ev)| a_ev.total_cmp(b_ev))
-        .unwrap()
 }
