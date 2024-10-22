@@ -238,3 +238,19 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
     final_hand.value
 }
 
+/// Padds an iterator into an array of len `SIMD_LANES`
+/// TODO: Handle "false" wins from padding
+pub fn padd(iter: impl IntoIterator<Item = Vec<Card>>) -> [Vec<Card>; SIMD_LANES] {
+    let mut iter = iter.into_iter();
+    array::from_fn(|_| {
+        iter.next().unwrap_or(vec![
+            Card::from_num(2, 3),
+            Card::from_num(3, 3),
+            Card::from_num(4, 3),
+            Card::from_num(10, 2),
+            Card::from_num(6, 2),
+            Card::from_num(7, 1),
+            Card::from_num(8, 1),
+        ])
+    })
+}
