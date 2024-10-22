@@ -8,13 +8,13 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use simd::{i8s, SIMD_LANES};
+use simd::{i8s, padd, SIMD_LANES};
 use std::{
+    array,
     fmt::Display,
     mem::{Assume, TransmuteFrom},
-    ops::Index,
+    ops::AddAssign,
     simd::cmp::SimdPartialOrd,
-    sync::atomic::{self, AtomicU32},
     thread,
 };
 
@@ -202,20 +202,18 @@ impl Hand {
 
 #[derive(Default, Debug)]
 struct WinsLosses {
-    wins: AtomicU32,
-    losses: AtomicU32,
+    wins: u32,
+    losses: u32,
 }
 impl WinsLosses {
     fn percentage(self) -> f64 {
-        let wins = self.wins.load(atomic::Ordering::Acquire);
-        let losses = self.losses.load(atomic::Ordering::Acquire);
-        f64::from(wins) / f64::from(wins + losses.max(1))
+        f64::from(self.wins) / f64::from(self.wins + self.losses.max(1))
     }
-    fn win(&mut self) {
-        self.wins.fetch_add(1, atomic::Ordering::Relaxed);
-    }
-    fn loss(&mut self) {
-        self.losses.fetch_add(1, atomic::Ordering::Relaxed);
+}
+impl AddAssign for WinsLosses {
+    fn add_assign(&mut self, rhs: Self) {
+        self.wins += rhs.wins;
+        self.losses += rhs.losses;
     }
 }
 
@@ -262,26 +260,49 @@ pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
     // Make the number divisible by the amount of SIMD-Lanes
     let chunk_size = chunk_size - (chunk_size % SIMD_LANES);
 
-    thread::scope(|scope| {
+    let wins_losses = thread::scope(|scope| {
         // THREADS + 1 because of remainder
-        for index in 0..(THREADS + 1) {
+        let handles: [_; THREADS + 1] = array::from_fn(|index| {
             let part = combinations
                 .clone()
                 .skip(index * chunk_size)
                 .take(chunk_size);
-            scope.spawn(|| {
-                let chunks = part
-                    .array_chunks::<SIMD_LANES>()
-                    .map(|remaining_pools| {
-                        (
-                            remaining_pools,
-                            remaining_pools.map(|remaining_pool| {
-                                pool.iter().copied().chain(remaining_pool.clone())
-                            }),
-                        )
-                    })
-                    .map(|(remaining_pools, entire_pools)| {
-                        (
+            scope.spawn({
+                // TODO: Avoid this clone
+                let deck = deck.clone();
+                move || {
+                    let mut wins_losses = WinsLosses::default();
+
+                    let chunks = part.array_chunks::<SIMD_LANES>();
+                    // TODO: Maybe add condition "if last_thread"
+                    let chunks = chunks.clone().chain(chunks.into_remainder().map(padd));
+                    let mapped = chunks
+                        .clone()
+                        .map(|remaining_pools| {
+                            (
+                                // TODO: Avoid clone
+                                remaining_pools.clone(),
+                                remaining_pools.map(|remaining_pool| {
+                                    pool.iter().copied().chain(remaining_pool.clone())
+                                }),
+                            )
+                        })
+                        .map(|(remaining_pools, entire_pools)| {
+                            (
+                                // TODO: Avoid clone
+                                remaining_pools.clone(),
+                                // TODO: Avoid clone
+                                entire_pools.clone(),
+                                // Player combined
+                                entire_pools.map(|entire_pool| {
+                                    entire_pool
+                                        .chain(player_cards.iter().copied())
+                                        .collect_vec()
+                                }),
+                            )
+                        });
+
+                    for (remaining_pools, entire_pools, player_combineds) in mapped {
                         compute_wins_losses(
                             player_combineds,
                             remaining_pools,
@@ -289,24 +310,21 @@ pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
                             entire_pools,
                             &mut wins_losses,
                         );
+                    }
+                    wins_losses
+                }
+            })
+        });
 
-                for (remaining_pools, entire_pools, player_combineds) in chunks {
-                    let player_hands_i8 = simd::highest_possible_hand(&mut player_combineds, None);
-                    let player_hands = player_hands_i8
-                        .to_array()
-                        .map(|hand_i8| Hand::from_inverted(hand_i8));
+        let mut wins_losses = WinsLosses::default();
+        for handle in handles {
+            wins_losses += handle.join().unwrap();
+        }
+        wins_losses
+    });
+    wins_losses.percentage()
+}
 
-                    for (i, remaining_pool) in remaining_pools.iter().enumerate() {
-                        let other_combineds = deck
-                            .clone()
-                            .into_iter()
-                            // Filter out cards already in the pool
-                            .filter(|deck_card| !remaining_pool.contains(deck_card))
-                            // Get possible other hand cards
-                            .combinations(2)
-                            .map(|other_cards| entire_pools[i].clone().chain(other_cards).collect())
-                            // TODO: Handle remainder
-                            .array_chunks::<SIMD_LANES>();
 fn compute_wins_losses(
     mut player_combineds: [Vec<Card>; 32],
     remaining_pools: [Vec<Card>; 32],
