@@ -180,24 +180,6 @@ pub enum Hand {
     HighCard = 0,
 }
 impl Hand {
-    /// Panics if num is not in -9..0
-    pub fn from_inverted(num: i8) -> Self {
-        assert!(num <= -(Hand::HighCard as i8) && num >= -(Hand::RoyalFlush as i8));
-
-        // Valid because of the above assertion
-        unsafe { Self::from_inverted_unchecked(num) }
-    }
-    /// Converts an inverted Hand value (from `highest_possible_hand`), for example -8
-    /// # Safety
-    /// Caller must ensure validity of passed num (must be in -9..0)
-    pub unsafe fn from_inverted_unchecked(num: i8) -> Self {
-        // Safe because Hand doesnt have any special invariants
-        // Validity ensured by caller
-        unsafe {
-            TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num.abs())
-        }
-    }
-
     pub fn random() -> Self {
         let mut rng = thread_rng();
         let value = rng.gen_range(0..=9);
@@ -219,6 +201,17 @@ impl Hand {
     //         other => 1 >> (other as u8 - 1),
     //     }
     // }
+    pub fn from_num(num: i8) -> Self {
+        assert!(num >= Self::HighCard as i8 && num <= Self::RoyalFlush as i8);
+
+        // Safe because of the above assertion
+        unsafe { Self::from_num_unchecked(num) }
+    }
+    /// # Safety
+    /// Caller must ensure num contains a bit-valid Hand
+    pub unsafe fn from_num_unchecked(num: i8) -> Self {
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num) }
+    }
 }
 
 #[derive(Default, Debug)]

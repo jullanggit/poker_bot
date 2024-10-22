@@ -17,7 +17,7 @@ macro_rules! hand_test {
                 ]
             });
             let highest_possible_hands = simd::highest_possible_hand(&mut input_cards, None);
-            let highest_possible_hand = unsafe { Hand::from_inverted(*highest_possible_hands.index(0)) };
+            let highest_possible_hand =  Hand::from_num(*highest_possible_hands.index(0)) ;
             assert_debug_snapshot!(highest_possible_hand, @$expected_output);
         }
     };
