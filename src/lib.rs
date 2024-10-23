@@ -247,7 +247,8 @@ pub fn calculate<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
 
     let mut deck = create_deck();
 
-    let present_cards = present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
+    let present_cards: [Card; POOL_SIZE + 2] =
+        present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
 
     deck.retain(|deck_card| !present_cards.contains(deck_card));
 
@@ -291,7 +292,7 @@ pub fn calculate<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
                                     if index < POOL_SIZE {
                                         pool[index]
                                     } else {
-                                        remaining_pool[index]
+                                        remaining_pool[index - POOL_SIZE]
                                     }
                                 })
                             });
@@ -301,7 +302,7 @@ pub fn calculate<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
                                     if index < 5 {
                                         entire_pool[index]
                                     } else {
-                                        player_cards[index]
+                                        player_cards[index - 5]
                                     }
                                 })
                             });
@@ -352,7 +353,7 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
                     if index < 2 {
                         other_cards[index]
                     } else {
-                        entire_pools[i][index]
+                        entire_pools[i][index - 2]
                     }
                 })
             })
