@@ -19,9 +19,7 @@ use std::{
     thread,
 };
 
-mod common;
 pub mod io;
-mod scalar;
 pub mod simd;
 
 const THREADS: usize = 12;
