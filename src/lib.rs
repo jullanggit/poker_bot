@@ -220,17 +220,17 @@ const fn num_combinations(n: usize, r: usize) -> usize {
     if r > n {
         0
     } else {
-        factorial(n) / (factorial(r) * factorial(n - r))
+        let mut result = 1;
+        let k = if r < n - r { r } else { n - r }; // Choose the smaller of r and n-r for optimization
+        let mut i = 0;
+
+        while i < k {
+            result *= (n - i) / (i + 1);
+            i += 1;
+        }
+
+        result
     }
-}
-const fn factorial(x: usize) -> usize {
-    let mut result = 1;
-    let mut i = 2;
-    while i <= x {
-        result *= i;
-        i += 1;
-    }
-    result
 }
 
 // PLAN: For every possible pool, calculate the highest possible hand for the player, then for
