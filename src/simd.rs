@@ -52,12 +52,10 @@ impl FinalHand {
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
 /// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
-pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option<Hand>) -> i8s {
-    assert!(input_cardss.len() == SIMD_LANES);
-    assert!(input_cardss
-        .iter()
-        .all(|input_cards| input_cards.len() == 7));
-
+pub fn highest_possible_hand(
+    input_cardss: &mut [[Card; 7]; SIMD_LANES],
+    player_hand: Option<Hand>,
+) -> i8s {
     let highest_hand = player_hand.unwrap_or(Hand::HighCard);
 
     input_cardss
@@ -240,17 +238,25 @@ pub fn highest_possible_hand(input_cardss: &mut [Vec<Card>], player_hand: Option
 
 /// Padds an iterator into an array of len `SIMD_LANES`
 /// TODO: Handle "false" wins from padding
-pub fn padd(iter: impl IntoIterator<Item = Vec<Card>>) -> [Vec<Card>; SIMD_LANES] {
+pub fn padd<const LEN: usize>(
+    iter: impl IntoIterator<Item = [Card; LEN]>,
+) -> [[Card; LEN]; SIMD_LANES] {
     let mut iter = iter.into_iter();
     array::from_fn(|_| {
-        iter.next().unwrap_or(vec![
-            Card::from_num(2, 3),
-            Card::from_num(3, 3),
-            Card::from_num(4, 3),
-            Card::from_num(10, 2),
-            Card::from_num(6, 2),
-            Card::from_num(7, 1),
-            Card::from_num(8, 1),
-        ])
+        iter.next()
+            .unwrap_or(array::from_fn(|index| HIGH_CARD[index]))
     })
 }
+
+// Safe because these values *are* valid cards
+const HIGH_CARD: [Card; 7] = unsafe {
+    [
+        Card::from_num_unchecked(2, 3),
+        Card::from_num_unchecked(3, 3),
+        Card::from_num_unchecked(4, 3),
+        Card::from_num_unchecked(10, 2),
+        Card::from_num_unchecked(6, 2),
+        Card::from_num_unchecked(7, 1),
+        Card::from_num_unchecked(8, 1),
+    ]
+};

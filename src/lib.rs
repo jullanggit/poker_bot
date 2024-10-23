@@ -2,6 +2,7 @@
 #![feature(portable_simd)]
 #![feature(iter_array_chunks)]
 #![feature(transmutability)]
+#![feature(generic_const_exprs)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -12,7 +13,7 @@ use simd::{i8s, padd, SIMD_LANES};
 use std::{
     array,
     fmt::Display,
-    mem::{Assume, TransmuteFrom},
+    mem::{transmute, Assume, TransmuteFrom},
     ops::AddAssign,
     simd::cmp::SimdPartialOrd,
     thread,
@@ -217,14 +218,21 @@ impl AddAssign for WinsLosses {
     }
 }
 
-fn num_combinations(n: usize, r: usize) -> usize {
-    // There are no combinations if r > n
+const fn num_combinations(n: usize, r: usize) -> usize {
     if r > n {
         0
     } else {
-        // ncr(n, r) == ncr(n, n-r)
-        (1..=r.min(n - r)).fold(1, |acc, val| acc * (n - val + 1) / val)
+        factorial(n) / (factorial(r) * factorial(n - r))
     }
+}
+const fn factorial(x: usize) -> usize {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= x {
+        result *= i;
+        i += 1;
+    }
+    result
 }
 
 // PLAN: For every possible pool, calculate the highest possible hand for the player, then for
@@ -233,29 +241,30 @@ fn num_combinations(n: usize, r: usize) -> usize {
 // chance to the amount of other players. Average these results over every hand to get the
 // final result, do this by keeping track of the current average and the count of chances, the
 // on each iteration add (chance - average chance)/count to the average chance
-pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
+// TODO: Remove the need to specify remaining pool size
+pub fn calculate<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
+    present_cards: Option<[Card; POOL_SIZE + 2]>,
+) -> f64 {
+    assert!(POOL_SIZE == 5 - REMAINING_POOL_SIZE);
+
     let mut deck = create_deck();
 
-    let present_cards = present_cards.unwrap_or_else(|| {
-        // let num = thread_rng().gen_range(4..=7);
-        let mut cards = Vec::with_capacity(5);
-        for _ in 0..5 {
-            cards.push(Card::random());
-        }
-        cards
-    });
+    let present_cards = present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
 
     deck.retain(|deck_card| !present_cards.contains(deck_card));
 
-    let (player_cards, pool) = present_cards.split_at(2);
+    let player_cards = [present_cards[0], present_cards[1]];
+    let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
 
     let combinations = deck
         .clone()
         .into_iter()
-        // Calculate possible pools
-        .combinations(5 - pool.len());
+        // TODO: Use tuple_combinations here
+        .combinations(5 - POOL_SIZE)
+        .map(|vec| TryInto::<[Card; REMAINING_POOL_SIZE]>::try_into(vec).unwrap());
 
-    let num_combinations = num_combinations(deck.len(), 5 - pool.len());
+    let num_combinations: usize =
+        const { num_combinations(56 - POOL_SIZE - 2, REMAINING_POOL_SIZE) };
     let chunk_size = num_combinations / THREADS;
     // Make the number divisible by the amount of SIMD-Lanes
     let chunk_size = chunk_size - (chunk_size % SIMD_LANES);
@@ -276,34 +285,29 @@ pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
                     let chunks = part.array_chunks::<SIMD_LANES>();
                     // TODO: Maybe add condition "if last_thread"
                     let chunks = chunks.clone().chain(chunks.into_remainder().map(padd));
-                    let mapped = chunks
-                        .clone()
-                        .map(|remaining_pools| {
-                            (
-                                // TODO: Avoid clone
-                                remaining_pools.clone(),
-                                remaining_pools.map(|remaining_pool| {
-                                    pool.iter().copied().chain(remaining_pool.clone())
-                                }),
-                            )
-                        })
-                        .map(|(remaining_pools, entire_pools)| {
-                            (
-                                // TODO: Avoid clone
-                                remaining_pools.clone(),
-                                // TODO: Avoid clone
-                                entire_pools.clone(),
-                                // Player combined
-                                entire_pools.map(|entire_pool| {
-                                    entire_pool
-                                        .chain(player_cards.iter().copied())
-                                        .collect_vec()
-                                }),
-                            )
-                        });
 
-                    for (remaining_pools, entire_pools, player_combineds) in mapped {
-                        compute_wins_losses(
+                    for remaining_pools in chunks {
+                        let entire_pools: [[Card; 5]; SIMD_LANES] =
+                            remaining_pools.map(|remaining_pool| {
+                                array::from_fn(|index| {
+                                    if index < POOL_SIZE {
+                                        pool[index]
+                                    } else {
+                                        remaining_pool[index]
+                                    }
+                                })
+                            });
+                        let player_combineds: [[Card; 7]; SIMD_LANES] =
+                            entire_pools.map(|entire_pool| {
+                                array::from_fn(|index| {
+                                    if index < 5 {
+                                        entire_pool[index]
+                                    } else {
+                                        player_cards[index]
+                                    }
+                                })
+                            });
+                        compute_wins_losses::<REMAINING_POOL_SIZE>(
                             player_combineds,
                             remaining_pools,
                             &deck,
@@ -325,12 +329,12 @@ pub fn calculate(present_cards: Option<Vec<Card>>) -> f64 {
     wins_losses.percentage()
 }
 
-fn compute_wins_losses(
-    mut player_combineds: [Vec<Card>; 32],
-    remaining_pools: [Vec<Card>; 32],
+fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
+    mut player_combineds: [[Card; 7]; SIMD_LANES],
+    // TODO: Specify the length of this vec using generics
+    remaining_pools: [[Card; REMAINING_POOL_SIZE]; SIMD_LANES],
     deck: &[Card],
-    entire_pools: [std::iter::Chain<std::iter::Copied<std::slice::Iter<'_, Card>>, std::vec::IntoIter<Card>>;
-        32],
+    entire_pools: [[Card; 5]; SIMD_LANES],
     wins_losses: &mut WinsLosses,
 ) {
     let player_hands_i8 = simd::highest_possible_hand(&mut player_combineds, None);
@@ -343,10 +347,20 @@ fn compute_wins_losses(
             // Filter out cards already in the pool
             .filter(|deck_card| !remaining_pool.contains(deck_card))
             // Get possible other hand cards
-            .combinations(2)
-            .map(|other_cards| entire_pools[i].clone().chain(other_cards).collect())
+            .tuple_combinations::<(_, _)>()
+            .map(|tuple| unsafe { transmute(tuple) })
+            .map(|other_cards: [Card; 2]| {
+                array::from_fn(|index| {
+                    if index < 2 {
+                        other_cards[index]
+                    } else {
+                        entire_pools[i][index]
+                    }
+                })
+            })
             // TODO: Handle remainder
             .array_chunks::<SIMD_LANES>();
+
         let other_combineds = other_combineds
             .clone()
             .chain(other_combineds.into_remainder().map(padd));

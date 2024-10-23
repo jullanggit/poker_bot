@@ -8,14 +8,14 @@ use std::array;
 
 fn bench_calculate(c: &mut Criterion) {
     c.bench_function("calculate", |b| {
-        b.iter(|| calculate(None));
+        b.iter(|| calculate::<3, 2>(None));
     });
 }
 fn bench_highest_possible_hand(c: &mut Criterion) {
     c.bench_function("highest_possible_hand", |b| {
         b.iter(|| {
-            let mut input_cardss: [Vec<Card>; SIMD_LANES] = array::from_fn(|_| {
-                vec![
+            let mut input_cardss: [[Card; 7]; SIMD_LANES] = array::from_fn(|_| {
+                [
                     Card::random(),
                     Card::random(),
                     Card::random(),

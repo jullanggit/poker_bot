@@ -11,8 +11,8 @@ macro_rules! hand_test {
     ($name:ident, $(($value:expr, $suit:expr)),+, $expected_output:literal) => {
         #[test]
         fn $name() {
-            let mut input_cards: [Vec<Card>; SIMD_LANES] = array::from_fn(|_| {
-                vec![
+            let mut input_cards: [[Card; 7]; SIMD_LANES] = array::from_fn(|_| {
+                [
                     $(Card::from_num($value, $suit)),+
                 ]
             });
