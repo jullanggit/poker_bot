@@ -2,7 +2,6 @@ use crate::{Card, CardValue, Hand, OptInvertedColor};
 use itertools::Itertools;
 use std::{
     array,
-    ops::{Index, IndexMut},
     simd::{
         cmp::{SimdPartialEq, SimdPartialOrd},
         Mask, Simd,
@@ -96,6 +95,13 @@ impl FinalHand {
         self.value = self.value.simd_lt(other).select(other, self.value);
     }
 }
+impl From<[i8; SIMD_LANES]> for FinalHand {
+    fn from(value: [i8; SIMD_LANES]) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
 
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
 /// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
@@ -119,8 +125,6 @@ pub fn highest_possible_hand(
     // Vector containing only colors
     let simd_colorss = simd_cardss.map(|simd_cards| simd_cards >> u8s::splat(4));
 
-    let mut final_hand = FinalHand::new();
-
     // Flush
     let mut colors_counters = [i8s::splat(0); 4];
     simd_colorss.iter().for_each(|simd_colors| {
@@ -139,9 +143,11 @@ pub fn highest_possible_hand(
         })
         .sum();
 
-    let mut is_straight: Mask<i8, SIMD_LANES> = Mask::splat(false);
+    let flush_arr = flush.as_array();
+    let mut is_straight_arr = [false; SIMD_LANES];
+    let mut final_hand_arr = [0; SIMD_LANES];
     for (index, input_cards) in input_cardss.iter().enumerate() {
-        let flush = OptInvertedColor::from_i8(*flush.index(index));
+        let flush = OptInvertedColor::from_i8(flush_arr[index]);
 
         let mut straight_stuff_iter = input_cards
             .iter()
@@ -190,23 +196,20 @@ pub fn highest_possible_hand(
         }
         let is_straight_local = straight_stuff.is_straight();
 
-        if is_straight_local {
-            // TODO: set_unchecked should be possible
-            is_straight.set(index, true);
-        }
+        is_straight_arr[index] = is_straight_local;
 
         let is_straight_flush = is_straight_local && straight_stuff.is_flush();
 
         // Royal flush
         if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
-            // No .min() necessary because RoyalFlush is the best possible hand
-            *final_hand.value.index_mut(index) = Hand::RoyalFlush as i8
+            final_hand_arr[index] = Hand::RoyalFlush as i8;
         // Straight Flush
         } else if is_straight_flush {
-            // Also, no .min() necessary because straight flush is the best possible hand at this point
-            *final_hand.value.index_mut(index) = Hand::StraightFlush as i8
+            final_hand_arr[index] = Hand::StraightFlush as i8;
         }
     }
+    let is_straight = is_straight_arr.into();
+    let mut final_hand: FinalHand = final_hand_arr.into();
 
     // Four of a Kind
     // TODO: See if using a .to_bitmask is better
