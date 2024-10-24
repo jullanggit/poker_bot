@@ -262,7 +262,7 @@ pub fn calculate(present_cards: Option<&[Card]>) -> f64 {
         }
         None => {
             let present_cards = array::from_fn(|_| Card::random());
-            calculate_inner::<1, 4>(Some(present_cards))
+            calculate_inner::<3, 2>(Some(present_cards))
         }
     }
 }
