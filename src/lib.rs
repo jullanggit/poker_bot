@@ -233,6 +233,20 @@ const fn num_combinations(n: usize, r: usize) -> usize {
     }
 }
 
+macro_rules! match_len {
+    ($present_cards:expr, $($num:expr),+) => {
+        match $present_cards.len() {
+            $(
+                $num => {
+                    let present_cards = $present_cards.try_into().unwrap();
+                    calculate_inner::<{$num-2}, {7-$num}>(Some(present_cards))
+                }
+            ),+
+            _ => unreachable!()
+        }
+    };
+}
+
 // PLAN: For every possible pool, calculate the highest possible hand for the player, then for
 // every possible other hand, look if it is higher than the player's one. Agregate the wins and
 // losses to calculate the chance that one of the others has a higher hand, then raise this
@@ -240,7 +254,19 @@ const fn num_combinations(n: usize, r: usize) -> usize {
 // final result, do this by keeping track of the current average and the count of chances, the
 // on each iteration add (chance - average chance)/count to the average chance
 // TODO: Remove the need to specify remaining pool size
-pub fn calculate<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
+#[inline]
+pub fn calculate(present_cards: Option<&[Card]>) -> f64 {
+    match present_cards {
+        Some(present_cards) => {
+            match_len!(present_cards, 2, 3, 4, 5, 6, 7)
+        }
+        None => {
+            let present_cards = array::from_fn(|_| Card::random());
+            calculate_inner::<1, 4>(Some(present_cards))
+        }
+    }
+}
+fn calculate_inner<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
     present_cards: Option<[Card; POOL_SIZE + 2]>,
 ) -> f64 {
     assert!(POOL_SIZE == 5 - REMAINING_POOL_SIZE);

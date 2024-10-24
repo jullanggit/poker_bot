@@ -8,7 +8,7 @@ use std::array;
 
 fn bench_calculate(c: &mut Criterion) {
     c.bench_function("calculate", |b| {
-        b.iter(|| calculate::<3, 2>(None));
+        b.iter(|| calculate(None));
     });
 }
 fn bench_highest_possible_hand(c: &mut Criterion) {
