@@ -287,18 +287,6 @@ pub fn highest_possible_hand(
     final_hand.value
 }
 
-/// Padds an iterator into an array of len `SIMD_LANES`
-/// TODO: Handle "false" wins from padding
-pub fn padd<const LEN: usize>(
-    iter: impl IntoIterator<Item = [Card; LEN]>,
-) -> [[Card; LEN]; SIMD_LANES] {
-    let mut iter = iter.into_iter();
-    array::from_fn(|_| {
-        iter.next()
-            .unwrap_or(array::from_fn(|index| HIGH_CARD[index]))
-    })
-}
-
 // Safe because these values *are* valid cards
 const HIGH_CARD: [Card; 7] = unsafe {
     [
@@ -311,3 +299,15 @@ const HIGH_CARD: [Card; 7] = unsafe {
         Card::from_num_unchecked(8, 1),
     ]
 };
+
+/// Padds an iterator into an array of len `SIMD_LANES`
+/// TODO: Handle "false" wins from padding
+pub fn padd<const LEN: usize>(
+    iter: impl IntoIterator<Item = [Card; LEN]>,
+) -> [[Card; LEN]; SIMD_LANES] {
+    let mut iter = iter.into_iter();
+    array::from_fn(|_| {
+        iter.next()
+            .unwrap_or(array::from_fn(|index| HIGH_CARD[index]))
+    })
+}
