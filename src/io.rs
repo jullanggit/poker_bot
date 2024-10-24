@@ -1,5 +1,4 @@
 use crate::{Card, CardValue, Color};
-use rand::{Rng, thread_rng};
 use std::{
     io,
     num::{ParseFloatError, ParseIntError},
@@ -59,73 +58,61 @@ impl FromStr for Color {
     }
 }
 
-pub fn get_cards(interactive: bool) -> Result<Vec<Card>, &'static str> {
-    if interactive {
-        // get input for cards
-        println!(
+pub fn get_cards() -> Result<Vec<Card>, &'static str> {
+    // get input for cards
+    println!(
             "Please input your handcards and the cards in the middle in the following format, separated by whitespace: Value,Color"
         );
-        let mut hand_buffer = String::new();
-        let _ = io::stdin().read_line(&mut hand_buffer);
+    let mut hand_buffer = String::new();
+    let _ = io::stdin().read_line(&mut hand_buffer);
 
-        // Seperate the Cards
-        let cards_string: Vec<&str> = hand_buffer.split_whitespace().collect();
+    // Seperate the Cards
+    let cards_string: Vec<&str> = hand_buffer.split_whitespace().collect();
 
-        if cards_string.len() > 7 {
-            return Err("Please input at max 7 cards");
-        }
-
-        cards_string.iter().map(|&string| string.parse()).collect()
-    } else {
-        // let num = thread_rng().gen_range(4..=7);
-        let mut cards = Vec::new();
-        for _ in 0..5 {
-            cards.push(Card::random());
-        }
-        Ok(cards)
+    if cards_string.len() < 2 || cards_string.len() > 7 {
+        return Err("Please input between 2 and 7 cards");
     }
+
+    cards_string.iter().map(|&string| string.parse()).collect()
 }
 
-pub fn get_player_count(interactive: bool) -> Result<i32, ParseIntError> {
-    if interactive {
-        println!("Please input the amount of other players participating");
-        let mut player_count_buffer = String::new();
-        let _ = io::stdin().read_line(&mut player_count_buffer);
+pub fn get_player_count() -> Result<u8, ParseIntError> {
+    println!("Please input the amount of other players participating");
+    let mut player_count_buffer = String::new();
+    let _ = io::stdin().read_line(&mut player_count_buffer);
 
-        player_count_buffer.trim_end().parse::<i32>()
-    } else {
-        Ok(thread_rng().gen_range(1..7))
-    }
+    player_count_buffer.trim_end().parse::<u8>()
 }
 
-pub fn get_pot(interactive: bool) -> Result<f64, ParseFloatError> {
-    if interactive {
-        println!("Please input how much is currently in the pot");
-        let mut input_buffer = String::new();
-        let _ = io::stdin().read_line(&mut input_buffer);
+pub fn get_pot() -> Result<f64, ParseFloatError> {
+    println!("Please input how much is currently in the pot");
+    let mut input_buffer = String::new();
+    let _ = io::stdin().read_line(&mut input_buffer);
 
-        input_buffer.trim_end().parse::<f64>()
-    } else {
-        Ok(thread_rng().gen_range(10.0..100_000.0))
-    }
+    input_buffer.trim_end().parse::<f64>()
 }
 
-pub fn get_min_max_bet(interactive: bool) -> Result<(u32, u32), ParseIntError> {
-    if interactive {
-        println!("Please input the minimum and maximum bet, seperated by spaces");
+pub fn get_min_max_bet() -> Result<(u32, u32), ParseIntError> {
+    println!("Please input the minimum and maximum bet, seperated by spaces");
 
-        let mut input_buffer = String::new();
-        let _ = io::stdin().read_line(&mut input_buffer);
+    let mut input_buffer = String::new();
+    let _ = io::stdin().read_line(&mut input_buffer);
 
-        let mut min_max = input_buffer.split_whitespace();
+    let mut min_max = input_buffer.split_whitespace();
 
-        let min = min_max.next().unwrap().parse()?;
-        let max = min_max.next().unwrap().parse()?;
+    let min = min_max.next().unwrap().parse()?;
+    let max = min_max.next().unwrap().parse()?;
 
-        Ok((min, max))
-    } else {
-        let min = thread_rng().gen_range(1..1000);
-        let max = min + thread_rng().gen_range(1..5000);
-        Ok((min, max))
-    }
+    Ok((min, max))
+}
+
+fn expected_value(win_chance: f64, pot: f64, bet: f64) -> f64 {
+    win_chance.mul_add(pot + bet, -((1. - win_chance) * bet))
+}
+
+pub fn best_bet(win_chance: f64, pot: f64, min_bet: u32, max_bet: u32) -> (u32, f64) {
+    (min_bet..=max_bet)
+        .map(|bet| (bet, expected_value(win_chance, pot, f64::from(bet))))
+        .max_by(|(_, a_ev), (_, b_ev)| a_ev.total_cmp(b_ev))
+        .unwrap()
 }

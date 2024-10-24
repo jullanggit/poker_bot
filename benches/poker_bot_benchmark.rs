@@ -1,10 +1,32 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use poker_bot::{calculate, highest_possible_hand, Card, Hand};
-use seq_macro::seq;
+use poker_bot::{
+    calculate,
+    simd::{self, SIMD_LANES},
+    Card, Hand,
+};
+use std::array;
 
 fn bench_calculate(c: &mut Criterion) {
     c.bench_function("calculate", |b| {
-        b.iter(|| calculate(false));
+        b.iter(|| calculate(None));
+    });
+}
+fn bench_highest_possible_hand(c: &mut Criterion) {
+    c.bench_function("highest_possible_hand", |b| {
+        b.iter(|| {
+            let mut input_cardss: [[Card; 7]; SIMD_LANES] = array::from_fn(|_| {
+                [
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                    Card::random(),
+                ]
+            });
+            simd::highest_possible_hand(&mut input_cardss, Some(Hand::random()))
+        });
     });
 }
 fn bench_highest_possible_hand(c: &mut Criterion) {

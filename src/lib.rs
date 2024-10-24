@@ -1,23 +1,28 @@
 #![feature(let_chains)]
+#![feature(portable_simd)]
+#![feature(iter_array_chunks)]
 #![feature(transmutability)]
+#![feature(generic_const_exprs)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use io::{get_cards, get_min_max_bet, get_player_count, get_pot};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use simd::{i8s, padd, SIMD_LANES};
 use std::{
+    array,
     fmt::Display,
-    mem::transmute,
-    mem::{Assume, TransmuteFrom},
+    mem::{transmute, Assume, TransmuteFrom},
     ops::AddAssign,
-    sync::atomic::{self, AtomicU32},
+    simd::cmp::SimdPartialOrd,
+    thread,
 };
-use strum_macros::EnumCount;
 
-mod io;
+pub mod io;
+pub mod simd;
+
+const THREADS: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -40,7 +45,7 @@ impl Card {
     }
     /// # Panics
     /// - If value isnt inside of 2..=14
-    /// - If color isnt inside of 2..=3
+    /// - If color isnt inside of 0..=3
     #[must_use]
     pub fn from_num(value: u8, color: u8) -> Self {
         assert!((2..=14).contains(&value));
@@ -48,6 +53,7 @@ impl Card {
 
         unsafe { Self::from_num_unchecked(value, color) }
     }
+    /// Only valid if value is inside of 2..=14 and color is inside 0..=3
     const unsafe fn from_num_unchecked(value: u8, color: u8) -> Self {
         Self {
             inner: value + ((color) << 4),
@@ -60,18 +66,28 @@ impl Card {
 
         Self::from_num(value, color)
     }
-    const fn value(self) -> CardValue {
-        // Safe because of the manually set discriminants
-        unsafe { transmute(self.inner & 0b0000_1111) }
+    #[inline(always)]
+    fn value(self) -> CardValue {
+        // Safe because CardValue doesnt have any special invariants
+        // Valid because Card always contains a valid CardValue
+        unsafe {
+            TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(
+                self.inner & 0b0000_1111,
+            )
+        }
     }
-    const fn color(self) -> Color {
-        // Safe because of the manually set discriminants
-        unsafe { transmute(self.inner >> 4) }
+    #[inline(always)]
+    fn color(self) -> Color {
+        // Safe because Color doesnt have any special invariants
+        // Valid because Card always contains a valid Color
+        unsafe {
+            TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(self.inner >> 4)
+        }
     }
 }
 impl Display for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Color: {:?}, Value: {:?}", self.color(), self.value())
+        write!(f, "{:?}, {:?}", self.color(), self.value())
     }
 }
 
@@ -93,6 +109,7 @@ pub enum CardValue {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum Color {
     Hearts = 0,
     Diamonds = 1,
@@ -100,7 +117,55 @@ pub enum Color {
     Spades = 3,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy, EnumCount)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(i8)]
+pub enum OptInvertedColor {
+    None = 0,
+    Hearts = -1,
+    Diamonds = -2,
+    Clubs = -3,
+    Spades = -4,
+}
+impl OptInvertedColor {
+    #[inline]
+    fn from_i8(num: i8) -> Self {
+        assert!((-4..=0).contains(&num));
+        // Validity guaranteed by the above assertion
+        unsafe { Self::from_i8_unchecked(num) }
+    }
+    #[inline]
+    /// Caller must guarantee that the i8 contains a bit-valid OptInvertedColor
+    unsafe fn from_i8_unchecked(num: i8) -> Self {
+        // Safety guaranteed because InvertedColor doesnt have any special invariants
+        // Validity guaranteed by caller
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num) }
+    }
+}
+impl From<Color> for OptInvertedColor {
+    fn from(value: Color) -> Self {
+        match value {
+            Color::Hearts => Self::Hearts,
+            Color::Diamonds => Self::Diamonds,
+            Color::Clubs => Self::Clubs,
+            Color::Spades => Self::Spades,
+        }
+    }
+}
+impl From<Option<Color>> for OptInvertedColor {
+    fn from(value: Option<Color>) -> Self {
+        match value {
+            Some(value) => match value {
+                Color::Hearts => Self::Hearts,
+                Color::Diamonds => Self::Diamonds,
+                Color::Clubs => Self::Clubs,
+                Color::Spades => Self::Spades,
+            },
+            None => Self::None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy)]
 pub enum Hand {
     RoyalFlush = 9,
     StraightFlush = 8,
@@ -114,17 +179,6 @@ pub enum Hand {
     HighCard = 0,
 }
 impl Hand {
-    /// Converts an inverted Hand value (from highest_possible_hand), for example -8
-    /// # Safety
-    /// Caller must ensure validity of passed num (must be in -9..0)
-    pub unsafe fn from_inverted(num: i8) -> Self {
-        // Safe because Hand doesnt have any special invariants
-        // Validity ensured by caller
-        unsafe {
-            TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num.abs())
-        }
-    }
-
     pub fn random() -> Self {
         let mut rng = thread_rng();
         let value = rng.gen_range(0..=9);
@@ -132,19 +186,65 @@ impl Hand {
         // Validity guaranteed because of above range bounds
         unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(value) }
     }
+    pub fn from_num(num: i8) -> Self {
+        assert!(num >= Self::HighCard as i8 && num <= Self::RoyalFlush as i8);
+
+        // Safe because of the above assertion
+        unsafe { Self::from_num_unchecked(num) }
+    }
+    /// # Safety
+    /// Caller must ensure num contains a bit-valid Hand
+    pub unsafe fn from_num_unchecked(num: i8) -> Self {
+        unsafe { TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(num) }
+    }
 }
 
 #[derive(Default, Debug)]
 struct WinsLosses {
-    wins: AtomicU32,
-    losses: AtomicU32,
+    wins: u32,
+    losses: u32,
 }
 impl WinsLosses {
     fn percentage(self) -> f64 {
-        let wins = self.wins.load(atomic::Ordering::Acquire);
-        let losses = self.losses.load(atomic::Ordering::Acquire);
-        f64::from(wins) / f64::from(wins + losses.max(1))
+        f64::from(self.wins) / f64::from(self.wins + self.losses.max(1))
     }
+}
+impl AddAssign for WinsLosses {
+    fn add_assign(&mut self, rhs: Self) {
+        self.wins += rhs.wins;
+        self.losses += rhs.losses;
+    }
+}
+
+const fn num_combinations(n: usize, r: usize) -> usize {
+    if r > n {
+        0
+    } else {
+        let mut result = 1;
+        let k = if r < n - r { r } else { n - r }; // Choose the smaller of r and n-r for optimization
+        let mut i = 0;
+
+        while i < k {
+            result *= (n - i) / (i + 1);
+            i += 1;
+        }
+
+        result
+    }
+}
+
+macro_rules! match_len {
+    ($present_cards:expr, $($num:expr),+) => {
+        match $present_cards.len() {
+            $(
+                $num => {
+                    let present_cards = $present_cards.try_into().unwrap();
+                    calculate_inner::<{$num-2}, {7-$num}>(Some(present_cards))
+                }
+            ),+
+            _ => unreachable!()
+        }
+    };
 }
 
 // PLAN: For every possible pool, calculate the highest possible hand for the player, then for
@@ -153,59 +253,162 @@ impl WinsLosses {
 // chance to the amount of other players. Average these results over every hand to get the
 // final result, do this by keeping track of the current average and the count of chances, the
 // on each iteration add (chance - average chance)/count to the average chance
-pub fn calculate(interactive: bool) {
+// TODO: Remove the need to specify remaining pool size
+#[inline]
+pub fn calculate(present_cards: Option<&[Card]>) -> f64 {
+    match present_cards {
+        Some(present_cards) => {
+            match_len!(present_cards, 2, 3, 4, 5, 6, 7)
+        }
+        None => {
+            let present_cards = array::from_fn(|_| Card::random());
+            calculate_inner::<3, 2>(Some(present_cards))
+        }
+    }
+}
+fn calculate_inner<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
+    present_cards: Option<[Card; POOL_SIZE + 2]>,
+) -> f64 {
+    assert!(POOL_SIZE == 5 - REMAINING_POOL_SIZE);
+
     let mut deck = create_deck();
 
-    let present_cards = get_cards(interactive).unwrap();
+    let present_cards: [Card; POOL_SIZE + 2] =
+        present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
 
-    let player_amount = get_player_count(interactive).unwrap();
-    let pot = get_pot(interactive).unwrap();
-    let (min_bet, max_bet) = get_min_max_bet(interactive).unwrap();
-
-    // Remove the present cards from the deck
     deck.retain(|deck_card| !present_cards.contains(deck_card));
 
-    let (player_cards, pool) = present_cards.split_at(2);
+    let player_cards = [present_cards[0], present_cards[1]];
+    let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
 
-    let wins_losses = WinsLosses::default();
-    deck.clone()
+    let combinations = deck
+        .clone()
         .into_iter()
-        // Calculate possible pools
-        .combinations(5 - pool.len())
-        .par_bridge()
-        .for_each(|remaining_pool| {
-            let entire_pool = pool.iter().copied().chain(remaining_pool.clone());
-            let player_combined = entire_pool
+        // TODO: Use tuple_combinations here
+        .combinations(5 - POOL_SIZE)
+        .map(|vec| TryInto::<[Card; REMAINING_POOL_SIZE]>::try_into(vec).unwrap());
+
+    let num_combinations: usize =
+        const { num_combinations(56 - POOL_SIZE - 2, REMAINING_POOL_SIZE) };
+    let chunk_size = num_combinations / THREADS;
+    // Make the number divisible by the amount of SIMD-Lanes
+    let chunk_size = chunk_size - (chunk_size % SIMD_LANES);
+
+    let wins_losses = thread::scope(|scope| {
+        // THREADS + 1 because of remainder
+        let handles: [_; THREADS + 1] = array::from_fn(|index| {
+            let part = combinations
                 .clone()
-                .chain(player_cards.iter().copied())
-                .collect();
-            let player_hand = highest_possible_hand(player_combined, None);
-            // Calculate win percentage
+                .skip(index * chunk_size)
+                .take(chunk_size);
+            scope.spawn({
+                // TODO: Avoid this clone
+                let deck = deck.clone();
+                move || {
+                    let mut wins_losses = WinsLosses::default();
 
-            deck.clone()
-                .into_iter()
-                // Filter out cards already in the pool
-                .filter(|deck_card| !remaining_pool.contains(deck_card))
-                // Get possible other hand cards
-                .combinations(2)
-                .for_each(|other_cards| {
-                    let other_combined = entire_pool.clone().chain(other_cards).collect();
-                    let other_hand = highest_possible_hand(other_combined, Some(player_hand));
+                    let chunks = part.array_chunks::<SIMD_LANES>();
+                    // TODO: Maybe add condition "if last_thread"
+                    let chunks = chunks.clone().chain(chunks.into_remainder().map(padd));
 
-                    // Aggregate wins, losses and draws
-                    if player_hand as u8 > other_hand as u8 {
-                        wins_losses.wins.fetch_add(1, atomic::Ordering::Relaxed);
+                    for remaining_pools in chunks {
+                        let entire_pools: [[Card; 5]; SIMD_LANES] =
+                            remaining_pools.map(|remaining_pool| {
+                                array::from_fn(|index| {
+                                    if index < POOL_SIZE {
+                                        pool[index]
+                                    } else {
+                                        remaining_pool[index - POOL_SIZE]
+                                    }
+                                })
+                            });
+                        let player_combineds: [[Card; 7]; SIMD_LANES] =
+                            entire_pools.map(|entire_pool| {
+                                array::from_fn(|index| {
+                                    if index < 5 {
+                                        entire_pool[index]
+                                    } else {
+                                        player_cards[index - 5]
+                                    }
+                                })
+                            });
+                        compute_wins_losses::<REMAINING_POOL_SIZE>(
+                            player_combineds,
+                            remaining_pools,
+                            &deck,
+                            entire_pools,
+                            &mut wins_losses,
+                        );
+                    }
+                    wins_losses
+                }
+            })
+        });
+
+        let mut wins_losses = WinsLosses::default();
+        for handle in handles {
+            wins_losses += handle.join().unwrap();
+        }
+        wins_losses
+    });
+    wins_losses.percentage()
+}
+
+fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
+    mut player_combineds: [[Card; 7]; SIMD_LANES],
+    // TODO: Specify the length of this vec using generics
+    remaining_pools: [[Card; REMAINING_POOL_SIZE]; SIMD_LANES],
+    deck: &[Card],
+    entire_pools: [[Card; 5]; SIMD_LANES],
+    wins_losses: &mut WinsLosses,
+) {
+    let player_hands_i8 = simd::highest_possible_hand(&mut player_combineds, None);
+    let player_hands = player_hands_i8.to_array().map(Hand::from_num);
+
+    for (i, remaining_pool) in remaining_pools.iter().enumerate() {
+        let other_combineds = deck
+            .iter()
+            .copied()
+            // Filter out cards already in the pool
+            .filter(|deck_card| !remaining_pool.contains(deck_card))
+            // Get possible other hand cards
+            .tuple_combinations::<(_, _)>()
+            .map(|tuple| unsafe { transmute(tuple) })
+            .map(|other_cards: [Card; 2]| {
+                array::from_fn(|index| {
+                    if index < 2 {
+                        other_cards[index]
                     } else {
-                        wins_losses.losses.fetch_add(1, atomic::Ordering::Relaxed);
+                        entire_pools[i][index - 2]
+                    }
+                })
+            })
+            // TODO: Handle remainder
+            .array_chunks::<SIMD_LANES>();
+
+        let other_combineds = other_combineds
+            .clone()
+            .chain(other_combineds.into_remainder().map(padd));
+
+        for mut other_combined in other_combineds.clone() {
+            let other_hand =
+                simd::highest_possible_hand(&mut other_combined, Some(player_hands[i]));
+
+            // Aggregate wins, losses and draws
+            // Less than because the better the hand, the lower the value
+            // TODO: Consider draws
+            i8s::splat(player_hands_i8[i])
+                .simd_lt(other_hand)
+                .to_array()
+                .into_iter()
+                .for_each(|win| {
+                    if win {
+                        wins_losses.wins += 1;
+                    } else {
+                        wins_losses.losses += 1;
                     }
                 });
-        });
-    let win_chance = wins_losses.percentage().powi(player_amount);
-
-    if interactive {
-        println!("Win chance: {}%", win_chance * 100.);
-        let (best_bet, ev) = best_bet(win_chance, pot, min_bet, max_bet);
-        println!("Best bet: {best_bet}, ev: {ev}",);
+        }
     }
 }
 
@@ -218,244 +421,4 @@ fn create_deck() -> Vec<Card> {
         }
     }
     deck
-}
-
-fn expected_value(win_chance: f64, pot: f64, bet: f64) -> f64 {
-    win_chance.mul_add(pot + bet, -((1. - win_chance) * bet))
-}
-
-fn best_bet(win_chance: f64, pot: f64, min_bet: u32, max_bet: u32) -> (u32, f64) {
-    (min_bet..=max_bet)
-        .map(|bet| (bet, expected_value(win_chance, pot, f64::from(bet))))
-        .max_by(|(_, a_ev), (_, b_ev)| a_ev.total_cmp(b_ev))
-        .unwrap()
-}
-
-#[derive(Default)]
-struct ColorsCounter {
-    hearts: u8,
-    diamonds: u8,
-    clubs: u8,
-    spades: u8,
-}
-impl ColorsCounter {
-    const fn flush(self) -> Option<Color> {
-        if self.hearts >= 5 {
-            Some(Color::Hearts)
-        } else if self.diamonds >= 5 {
-            Some(Color::Diamonds)
-        } else if self.clubs >= 5 {
-            Some(Color::Clubs)
-        } else if self.spades >= 5 {
-            Some(Color::Spades)
-        } else {
-            None
-        }
-    }
-}
-impl AddAssign<Color> for ColorsCounter {
-    fn add_assign(&mut self, rhs: Color) {
-        match rhs {
-            Color::Hearts => self.hearts += 1,
-            Color::Diamonds => self.diamonds += 1,
-            Color::Clubs => self.clubs += 1,
-            Color::Spades => self.spades += 1,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct StraightStuff {
-    start: CardValue,
-    end: CardValue,
-    flush_counter: u8,
-    flush_end: Option<CardValue>,
-    unsure: bool,
-}
-impl From<(Card, Option<Color>)> for StraightStuff {
-    fn from((card, flush_color): (Card, Option<Color>)) -> Self {
-        let card_is_flush = card_is_flush(card, flush_color);
-
-        Self {
-            start: card.value(),
-            end: card.value(),
-            flush_counter: u8::from(card_is_flush),
-            flush_end: if card_is_flush {
-                Some(card.value())
-            } else {
-                None
-            },
-            unsure: !card_is_flush,
-        }
-    }
-}
-impl StraightStuff {
-    fn is_straight(self) -> bool {
-        diff_considerig_ace(self.end, self.start) >= 4
-    }
-    const fn is_flush(self) -> bool {
-        self.flush_counter >= 5
-    }
-}
-fn card_is_flush(card: Card, flush_color: Option<Color>) -> bool {
-    flush_color.map_or(false, |flush_color| card.color() == flush_color)
-}
-fn diff_considerig_ace(a: CardValue, b: CardValue) -> u8 {
-    (a as u8)
-        .checked_sub(b as u8)
-        // If the previous card was an ace and the current isnt, treat the ace as a 1
-        .unwrap_or(a as u8 - 1)
-}
-
-/// Returns `HighCard` if no `Hand` >= `player_hand` is found
-#[must_use]
-pub fn highest_possible_hand(mut input_cards: Vec<Card>, player_hand: Option<Hand>) -> Hand {
-    assert!(input_cards.len() == 7);
-    let highest_hand = player_hand.unwrap_or(Hand::HighCard);
-
-    input_cards.sort_unstable_by_key(|card| card.value());
-
-    let flush = input_cards
-        .iter()
-        .fold(ColorsCounter::default(), |mut counter, card| {
-            counter += card.color();
-            counter
-        })
-        .flush();
-
-    let mut straight_stuff_iter = input_cards
-        .iter()
-        .rev()
-        .take_while(|card| card.value() == CardValue::Ace)
-        .chain(input_cards.iter());
-
-    let mut straight_stuff: StraightStuff = (
-        *straight_stuff_iter
-            .next()
-            .expect("Iterator always has at least 7 elements"),
-        flush,
-    )
-        .into();
-
-    // TODO: See if into_iter is faster
-    for cur_card in straight_stuff_iter {
-        let diff = diff_considerig_ace(cur_card.value(), straight_stuff.end);
-        if diff == 0 {
-            if straight_stuff.unsure && card_is_flush(*cur_card, flush) {
-                straight_stuff.unsure = false;
-            }
-        // If the current card is consecutive to the end of the current straight
-        } else if diff == 1 {
-            straight_stuff.end = cur_card.value();
-
-            if straight_stuff.unsure {
-                straight_stuff.flush_counter = 0;
-                straight_stuff.flush_end = None;
-            }
-
-            if card_is_flush(*cur_card, flush) {
-                straight_stuff.flush_counter += 1;
-                straight_stuff.flush_end = Some(cur_card.value());
-            // Set unsure because maybe theres another card of the same value but with the right suit
-            // Dont set unsure if there already is a straight flush
-            } else if straight_stuff.flush_counter < 5 {
-                straight_stuff.unsure = true;
-            }
-        } else if diff > 1 {
-            if straight_stuff.is_straight() {
-                break;
-            }
-            straight_stuff = (*cur_card, flush).into();
-        }
-    }
-    let is_straight = straight_stuff.is_straight();
-
-    let is_straight_flush = is_straight && straight_stuff.is_flush();
-
-    // Royal flush
-    if is_straight_flush && straight_stuff.flush_end == Some(CardValue::Ace) {
-        return Hand::RoyalFlush;
-    }
-
-    // Straight Flush
-    if is_straight_flush {
-        return Hand::StraightFlush;
-    }
-
-    if highest_hand > Hand::FourOfAKind {
-        return Hand::HighCard;
-    }
-
-    // Four of a Kind
-    if input_cards.iter().tuple_windows().any(|(a, b, c, d)| {
-        let (a, b, c, d) = (a.value(), b.value(), c.value(), d.value());
-        a == b && a == c && a == d
-    }) {
-        return Hand::FourOfAKind;
-    }
-
-    if highest_hand > Hand::FullHouse {
-        return Hand::HighCard;
-    }
-
-    // Up here because necessary for full house
-    let is_three_of_a_kind = input_cards.iter().tuple_windows().any(|(a, b, c)| {
-        let (a, b, c) = (a.value(), b.value(), c.value());
-        a == b && a == c
-    });
-
-    // Up here because necessary for full house
-    let pairs = input_cards
-        .iter()
-        .tuple_windows()
-        .filter(|(a, b)| a == b)
-        .count();
-
-    // Works because four of a kind is already checked for, so one pair is in the three of a kind,
-    // and the other somewhere else -> full house
-    if is_three_of_a_kind && pairs >= 2 {
-        return Hand::FullHouse;
-    }
-
-    if highest_hand > Hand::Flush {
-        return Hand::HighCard;
-    }
-
-    // Flush
-    if flush.is_some() {
-        return Hand::Flush;
-    }
-
-    if highest_hand > Hand::Straight {
-        return Hand::HighCard;
-    }
-
-    // Straight
-    if is_straight {
-        return Hand::Straight;
-    }
-
-    if highest_hand > Hand::ThreeOfAKind {
-        return Hand::HighCard;
-    }
-
-    // Three of a kind
-    if is_three_of_a_kind {
-        return Hand::ThreeOfAKind;
-    }
-
-    if highest_hand > Hand::TwoPair {
-        return Hand::HighCard;
-    }
-
-    // Two pair
-    if pairs >= 2 {
-        return Hand::TwoPair;
-    }
-
-    if pairs == 1 {
-        return Hand::Pair;
-    }
-
-    Hand::HighCard
 }

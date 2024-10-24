@@ -1,2 +1,4 @@
-/target
+target/
 bacon.toml
+profiling/
+pgo/
