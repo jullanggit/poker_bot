@@ -8,7 +8,7 @@ use poker_bot::{
 };
 
 fn main() {
-    calculate(None);
+    cli();
 }
 
 fn cli() {
