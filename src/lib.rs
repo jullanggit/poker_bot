@@ -3,17 +3,18 @@
 #![feature(iter_array_chunks)]
 #![feature(transmutability)]
 #![feature(generic_const_exprs)]
+#![feature(maybe_uninit_array_assume_init)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
-use simd::{i8s, padd, SIMD_LANES};
+use rand::{Rng, thread_rng};
+use simd::{SIMD_LANES, i8s, padd};
 use std::{
     array,
-    fmt::Display,
-    mem::{transmute, Assume, TransmuteFrom},
+    fmt::{Debug, Display},
+    mem::{Assume, MaybeUninit, TransmuteFrom, transmute},
     ops::AddAssign,
     simd::cmp::SimdPartialOrd,
     thread,
@@ -23,8 +24,9 @@ pub mod io;
 pub mod simd;
 
 const THREADS: usize = 12;
+const FULL_DECK_SIZE: usize = 52;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Card {
     // First 4 bits = Value
@@ -86,6 +88,11 @@ impl Card {
     }
 }
 impl Display for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}, {:?}", self.color(), self.value())
+    }
+}
+impl Debug for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}, {:?}", self.color(), self.value())
     }
@@ -268,21 +275,22 @@ pub fn calculate(present_cards: Option<&[Card]>) -> f64 {
 }
 fn calculate_inner<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
     present_cards: Option<[Card; POOL_SIZE + 2]>,
-) -> f64 {
+) -> f64
+where
+    [(); 54 - POOL_SIZE]:,
+    [(); FULL_DECK_SIZE - 2 - POOL_SIZE]:,
+{
     assert!(POOL_SIZE == 5 - REMAINING_POOL_SIZE);
-
-    let mut deck = create_deck();
 
     let present_cards: [Card; POOL_SIZE + 2] =
         present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
 
-    deck.retain(|deck_card| !present_cards.contains(deck_card));
+    let deck = create_deck::<POOL_SIZE>(present_cards);
 
     let player_cards = [present_cards[0], present_cards[1]];
     let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
 
     let combinations = deck
-        .clone()
         .into_iter()
         // TODO: Use tuple_combinations here
         .combinations(5 - POOL_SIZE)
@@ -302,8 +310,6 @@ fn calculate_inner<const POOL_SIZE: usize, const REMAINING_POOL_SIZE: usize>(
                 .skip(index * chunk_size)
                 .take(chunk_size);
             scope.spawn({
-                // TODO: Avoid this clone
-                let deck = deck.clone();
                 move || {
                     let mut wins_losses = WinsLosses::default();
 
@@ -412,13 +418,27 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
     }
 }
 
-fn create_deck() -> Vec<Card> {
-    let mut deck = Vec::new();
+fn create_deck<const POOL_SIZE: usize>(
+    present_cards: [Card; POOL_SIZE + 2],
+) -> [Card; FULL_DECK_SIZE - 2 - POOL_SIZE] {
+    let mut deck = [MaybeUninit::uninit(); FULL_DECK_SIZE - 2 - POOL_SIZE];
+
+    dbg!(present_cards);
+
+    let mut index = 0;
     for color in 0..=3 {
         for value in 2..=14 {
-            // Safe because of above loop bounds
-            deck.push(Card::from_num(value, color));
+            let card = Card::from_num(value, color);
+            if !present_cards.contains(&card) {
+                deck[index].write(card);
+                index += 1;
+            } else {
+                dbg!(card);
+            }
         }
     }
-    deck
+
+    assert!(index == deck.len());
+    // Safe because we asserted that the entire array was filled
+    unsafe { MaybeUninit::array_assume_init(deck) }
 }
