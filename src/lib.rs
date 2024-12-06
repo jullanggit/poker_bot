@@ -4,6 +4,7 @@
 #![feature(transmutability)]
 #![feature(generic_const_exprs)]
 #![feature(maybe_uninit_array_assume_init)]
+#![feature(maybe_uninit_slice)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -268,8 +269,22 @@ pub fn calculate(present_cards: Option<&[Card]>) -> f64 {
             match_len!(present_cards, 2, 3, 4, 5, 6, 7)
         }
         None => {
-            let present_cards = array::from_fn(|_| Card::random());
-            calculate_inner::<3, 2>(Some(present_cards))
+            let mut present_cards = [MaybeUninit::uninit(); 5];
+
+            for index in 0..present_cards.len() {
+                let mut card = Card::random();
+
+                while unsafe { MaybeUninit::slice_assume_init_ref(&present_cards[0..index]) }
+                    .contains(&card)
+                {
+                    card = Card::random();
+                }
+                present_cards[index].write(card);
+            }
+
+            calculate_inner::<3, 2>(Some(unsafe {
+                MaybeUninit::array_assume_init(present_cards)
+            }))
         }
     }
 }
