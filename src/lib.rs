@@ -443,17 +443,18 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
 fn create_deck<const POOL_SIZE: usize>(
     present_cards: [Card; POOL_SIZE + 2],
 ) -> [Card; FULL_DECK_SIZE - 2 - POOL_SIZE] {
-    let mut deck = [MaybeUninit::uninit(); FULL_DECK_SIZE - 2 - POOL_SIZE];
-
-    (2..=14)
+    let mut iter = (2..=14)
         .flat_map(|value| (0..=3).map(move |color| (value, color)))
         .map(Card::from_tuple)
-        .filter(|card| !present_cards.contains(card))
-        .enumerate()
-        .for_each(|(index, card)| {
-            deck[index].write(card);
-        });
+        .filter(|card| !present_cards.contains(card));
 
-    // Safe because we asserted that the entire array is filled
-    unsafe { MaybeUninit::array_assume_init(deck) }
+    let deck = array::from_fn(|_| {
+        iter.next()
+            .expect("Failed to get next card for building deck")
+    });
+
+    // Assert that the entire iterator was used up
+    assert!(iter.next().is_none());
+
+    deck
 }
