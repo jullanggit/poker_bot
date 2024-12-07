@@ -56,6 +56,13 @@ impl Card {
 
         unsafe { Self::from_num_unchecked(value, color) }
     }
+    /// # Panics
+    /// - If value isnt inside of 2..=14
+    /// - If color isnt inside of 0..=3
+    #[must_use]
+    pub fn from_tuple((value, color): (u8, u8)) -> Self {
+        Self::from_num(value, color)
+    }
     /// Only valid if value is inside of 2..=14 and color is inside 0..=3
     const unsafe fn from_num_unchecked(value: u8, color: u8) -> Self {
         Self {
@@ -438,22 +445,15 @@ fn create_deck<const POOL_SIZE: usize>(
 ) -> [Card; FULL_DECK_SIZE - 2 - POOL_SIZE] {
     let mut deck = [MaybeUninit::uninit(); FULL_DECK_SIZE - 2 - POOL_SIZE];
 
-    dbg!(present_cards);
+    (2..=14)
+        .flat_map(|value| (0..=3).map(move |color| (value, color)))
+        .map(Card::from_tuple)
+        .filter(|card| !present_cards.contains(card))
+        .enumerate()
+        .for_each(|(index, card)| {
+            deck[index].write(card);
+        });
 
-    let mut index = 0;
-    for color in 0..=3 {
-        for value in 2..=14 {
-            let card = Card::from_num(value, color);
-            if !present_cards.contains(&card) {
-                deck[index].write(card);
-                index += 1;
-            } else {
-                dbg!(card);
-            }
-        }
-    }
-
-    assert!(index == deck.len());
-    // Safe because we asserted that the entire array was filled
+    // Safe because we asserted that the entire array is filled
     unsafe { MaybeUninit::array_assume_init(deck) }
 }
