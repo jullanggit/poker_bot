@@ -2,7 +2,7 @@ use insta::assert_debug_snapshot;
 use poker_bot::{Card, CardValue, Color, combinations::CardCombinations};
 
 #[test]
-fn combinations() {
+fn basic() {
     // Some random cards
     let cards = [
         Card::new(CardValue::Two, Color::Diamonds),
