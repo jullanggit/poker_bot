@@ -5,6 +5,7 @@
 #![feature(generic_const_exprs)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_slice)]
+#![feature(array_try_from_fn)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -440,6 +441,9 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
     }
 }
 
+/// Creates a full poker deck, without the given present cards in it
+/// # Panics
+/// - If there are any duplicate cards in the present_cards
 fn create_deck<const POOL_SIZE: usize>(
     present_cards: [Card; POOL_SIZE + 2],
 ) -> [Card; FULL_DECK_SIZE - 2 - POOL_SIZE] {
@@ -448,10 +452,7 @@ fn create_deck<const POOL_SIZE: usize>(
         .map(Card::from_tuple)
         .filter(|card| !present_cards.contains(card));
 
-    let deck = array::from_fn(|_| {
-        iter.next()
-            .expect("Failed to get next card for building deck")
-    });
+    let deck = array::try_from_fn(|_| iter.next()).expect("Failed to create deck");
 
     // Assert that the entire iterator was used up
     assert!(iter.next().is_none());
