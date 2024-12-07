@@ -1,4 +1,4 @@
-cargo-features = ["codegen-backend", "edition2024"]
+cargo-features = ["codegen-backend"]
 [package]
 name = "poker_bot"
 version = "0.1.0"
