@@ -22,7 +22,7 @@ impl<'a, const N: usize, const K: usize> CardCombinations<'a, N, K> {
         array::from_fn(|index| self.cards[self.indices[index]])
     }
 }
-impl<'a, const N: usize, const K: usize> Iterator for CardCombinations<'_, N, K> {
+impl<const N: usize, const K: usize> Iterator for CardCombinations<'_, N, K> {
     type Item = [Card; K];
     fn next(&mut self) -> Option<Self::Item> {
         if self.first {
