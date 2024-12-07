@@ -2,3 +2,4 @@ target/
 bacon.toml
 profiling/
 pgo/
+perf.data*
