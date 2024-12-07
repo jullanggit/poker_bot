@@ -10,18 +10,20 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use combinations::CardCombinations;
 use itertools::Itertools;
 use rand::{Rng, thread_rng};
-use simd::{SIMD_LANES, i8s, padd};
+use simd::{SIMD_LANES, i8s, pad};
 use std::{
     array,
-    fmt::{Debug, Display},
+    fmt::Debug,
     mem::{Assume, MaybeUninit, TransmuteFrom, transmute},
     ops::AddAssign,
     simd::cmp::SimdPartialOrd,
     thread,
 };
 
+mod combinations;
 pub mod io;
 pub mod simd;
 
@@ -94,11 +96,6 @@ impl Card {
         unsafe {
             TransmuteFrom::<_, { Assume::SAFETY.and(Assume::VALIDITY) }>::transmute(self.inner >> 4)
         }
-    }
-}
-impl Display for Card {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}, {:?}", self.color(), self.value())
     }
 }
 impl Debug for Card {
@@ -264,7 +261,7 @@ macro_rules! match_len {
 }
 
 // PLAN: For every possible pool, calculate the highest possible hand for the player, then for
-// every possible other hand, look if it is higher than the player's one. Agregate the wins and
+// every possible other hand, look if it is higher than the player's one. Aggregate the wins and
 // losses to calculate the chance that one of the others has a higher hand, then raise this
 // chance to the amount of other players. Average these results over every hand to get the
 // final result, do this by keeping track of the current average and the count of chances, the
@@ -314,11 +311,7 @@ where
     let player_cards = [present_cards[0], present_cards[1]];
     let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
 
-    let combinations = deck
-        .into_iter()
-        // TODO: Use tuple_combinations here
-        .combinations(5 - POOL_SIZE)
-        .map(|vec| TryInto::<[Card; REMAINING_POOL_SIZE]>::try_into(vec).unwrap());
+    let combinations = CardCombinations::new(&deck).into_iter();
 
     let num_combinations: usize =
         const { num_combinations(56 - POOL_SIZE - 2, REMAINING_POOL_SIZE) };
@@ -331,6 +324,7 @@ where
         let handles: [_; THREADS + 1] = array::from_fn(|index| {
             let part = combinations
                 .clone()
+                // TODO: Add a method to just set the indices to the right values
                 .skip(index * chunk_size)
                 .take(chunk_size);
             scope.spawn({
@@ -339,7 +333,7 @@ where
 
                     let chunks = part.array_chunks::<SIMD_LANES>();
                     // TODO: Maybe add condition "if last_thread"
-                    let chunks = chunks.clone().chain(chunks.into_remainder().map(padd));
+                    let chunks = chunks.clone().chain(chunks.into_remainder().map(pad));
 
                     for remaining_pools in chunks {
                         let entire_pools: [[Card; 5]; SIMD_LANES] =
@@ -418,7 +412,7 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
 
         let other_combineds = other_combineds
             .clone()
-            .chain(other_combineds.into_remainder().map(padd));
+            .chain(other_combineds.into_remainder().map(pad));
 
         for mut other_combined in other_combineds.clone() {
             let other_hand =
