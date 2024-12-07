@@ -23,7 +23,7 @@ use std::{
     thread,
 };
 
-mod combinations;
+pub mod combinations;
 pub mod io;
 pub mod simd;
 
@@ -311,7 +311,7 @@ where
     let player_cards = [present_cards[0], present_cards[1]];
     let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
 
-    let combinations = CardCombinations::new(&deck).into_iter();
+    let combinations = CardCombinations::new(&deck);
 
     let num_combinations: usize =
         const { num_combinations(56 - POOL_SIZE - 2, REMAINING_POOL_SIZE) };
