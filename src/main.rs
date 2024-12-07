@@ -1,14 +1,13 @@
 use std::array;
 
 use poker_bot::{
-    calculate,
+    Card, Hand, calculate,
     io::{best_bet, get_cards, get_min_max_bet, get_player_count, get_pot},
     simd::{self, SIMD_LANES},
-    Card, Hand,
 };
 
 fn main() {
-    cli();
+    loop_calculate();
 }
 
 fn cli() {
@@ -26,7 +25,7 @@ fn cli() {
 }
 
 fn loop_highest_possible_hand() {
-    for _ in 0..10000 {
+    for _ in 0..1000000 {
         let mut input_cardss: [[Card; 7]; SIMD_LANES] = array::from_fn(|_| {
             [
                 Card::random(),
@@ -40,5 +39,11 @@ fn loop_highest_possible_hand() {
         });
         let _ = simd::highest_possible_hand(&mut input_cardss, Some(Hand::random()));
         // coz::progress!();
+    }
+}
+
+fn loop_calculate() {
+    for _ in 0..1000 {
+        calculate(None);
     }
 }
