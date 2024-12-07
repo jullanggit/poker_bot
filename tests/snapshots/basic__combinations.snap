@@ -1,0 +1,19 @@
+---
+source: tests/basic.rs
+expression: combinations
+snapshot_kind: text
+---
+[
+    [
+        Diamonds, Two,
+        Clubs, Jack,
+    ],
+    [
+        Diamonds, Two,
+        Spades, Ace,
+    ],
+    [
+        Clubs, Jack,
+        Spades, Ace,
+    ],
+]
