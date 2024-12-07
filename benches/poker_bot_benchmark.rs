@@ -29,20 +29,6 @@ fn bench_highest_possible_hand(c: &mut Criterion) {
         });
     });
 }
-fn bench_highest_possible_hand(c: &mut Criterion) {
-    c.bench_function("highest_possible_hand", |b| {
-        b.iter(|| {
-            seq!(_ in 0..7 {
-                let input_cardss = vec!(
-                    #(
-                        Card::random(),
-                    )*
-                );
-            });
-            highest_possible_hand(input_cardss, Some(Hand::random()))
-        });
-    });
-}
 
 // Define the Criterion groups and main function
 criterion_group! {
