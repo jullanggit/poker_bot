@@ -3,8 +3,8 @@ use itertools::Itertools;
 use std::{
     array,
     simd::{
-        cmp::{SimdPartialEq, SimdPartialOrd},
         Mask, Simd,
+        cmp::{SimdPartialEq, SimdPartialOrd},
     },
 };
 
@@ -104,7 +104,6 @@ impl From<[i8; SIMD_LANES]> for FinalHand {
 }
 
 /// Returns `HighCard` if no `Hand` >= `player_hand` is found
-/// TODO: See if accepting impl Iterator<Item = Vec<Card>> would be faster
 #[must_use]
 pub fn highest_possible_hand(
     input_cardss: &mut [[Card; 7]; SIMD_LANES],
@@ -300,9 +299,9 @@ const HIGH_CARD: [Card; 7] = unsafe {
     ]
 };
 
-/// Padds an iterator into an array of len `SIMD_LANES`
+/// Pads an iterator into an array of len `SIMD_LANES`
 /// TODO: Handle "false" wins from padding
-pub fn padd<const LEN: usize>(
+pub fn pad<const LEN: usize>(
     iter: impl IntoIterator<Item = [Card; LEN]>,
 ) -> [[Card; LEN]; SIMD_LANES] {
     let mut iter = iter.into_iter();

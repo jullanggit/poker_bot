@@ -66,7 +66,7 @@ pub fn get_cards() -> Result<Vec<Card>, &'static str> {
     let mut hand_buffer = String::new();
     let _ = io::stdin().read_line(&mut hand_buffer);
 
-    // Seperate the Cards
+    // Separate the Cards
     let cards_string: Vec<&str> = hand_buffer.split_whitespace().collect();
 
     if cards_string.len() < 2 || cards_string.len() > 7 {
@@ -93,7 +93,7 @@ pub fn get_pot() -> Result<f64, ParseFloatError> {
 }
 
 pub fn get_min_max_bet() -> Result<(u32, u32), ParseIntError> {
-    println!("Please input the minimum and maximum bet, seperated by spaces");
+    println!("Please input the minimum and maximum bet, separated by spaces");
 
     let mut input_buffer = String::new();
     let _ = io::stdin().read_line(&mut input_buffer);
