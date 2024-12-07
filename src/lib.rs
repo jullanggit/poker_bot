@@ -308,7 +308,8 @@ where
     let present_cards: [Card; POOL_SIZE + 2] =
         present_cards.unwrap_or_else(|| array::from_fn(|_| Card::random()));
 
-    let deck = create_deck::<POOL_SIZE>(present_cards);
+    let deck = create_deck_without_present_cards::<POOL_SIZE>(present_cards)
+        .expect("Failed to create deck without present cards");
 
     let player_cards = [present_cards[0], present_cards[1]];
     let pool: [Card; POOL_SIZE] = array::from_fn(|index| present_cards[index]);
@@ -441,21 +442,18 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
     }
 }
 
-/// Creates a full poker deck, without the given present cards in it
-/// # Panics
-/// - If there are any duplicate cards in the present_cards
-fn create_deck<const POOL_SIZE: usize>(
+/// Creates a full poker deck, without the given present cards in it.
+/// Returns None, if there are any duplicates in the present cards
+fn create_deck_without_present_cards<const POOL_SIZE: usize>(
     present_cards: [Card; POOL_SIZE + 2],
-) -> [Card; FULL_DECK_SIZE - 2 - POOL_SIZE] {
+) -> Option<[Card; FULL_DECK_SIZE - 2 - POOL_SIZE]> {
     let mut iter = (2..=14)
         .flat_map(|value| (0..=3).map(move |color| (value, color)))
         .map(Card::from_tuple)
         .filter(|card| !present_cards.contains(card));
 
-    let deck = array::try_from_fn(|_| iter.next()).expect("Failed to create deck");
+    let deck = array::try_from_fn(|_| iter.next());
 
-    // Assert that the entire iterator was used up
-    assert!(iter.next().is_none());
-
-    deck
+    // If the iterator isnt used up
+    if iter.next().is_some() { None } else { deck }
 }
