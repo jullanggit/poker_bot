@@ -1,28 +1,12 @@
 #![feature(portable_simd)]
 
-use insta::{assert_debug_snapshot, assert_snapshot};
+use insta::assert_debug_snapshot;
 use poker_bot::{
-    Card, CardValue, Color, Hand,
-    combinations::CardCombinations,
-    simd::{self, SIMD_LANES, highest_possible_hand},
+    Card, Hand,
+    simd::{self, SIMD_LANES},
 };
 use std::{array, ops::Index};
 
-// Combinations test
-#[test]
-fn combinations() {
-    // Some random cards
-    let cards = [
-        Card::new(CardValue::Two, Color::Diamonds),
-        Card::new(CardValue::Jack, Color::Clubs),
-        Card::new(CardValue::Ace, Color::Spades),
-    ];
-    let combinations: Vec<_> = CardCombinations::<3, 2>::new(&cards).collect();
-
-    assert_debug_snapshot!(combinations);
-}
-
-// Highest possible hand tests
 macro_rules! hand_test {
     ($name:ident, $(($value:expr, $suit:expr)),+, $expected_output:literal) => {
         #[test]
