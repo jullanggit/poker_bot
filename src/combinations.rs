@@ -31,7 +31,7 @@ impl<'a, const N: usize, const K: usize> Iterator for CardCombinations<'_, N, K>
         }
 
         // Increment the indices
-        let mut indices_index = K;
+        let mut indices_index = K - 1;
 
         // Decrement indices index to find one that isnt at its maximum allowed value
         while self.indices[indices_index] == indices_index + N - K {
