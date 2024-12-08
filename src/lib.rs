@@ -6,18 +6,18 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_slice)]
 #![feature(array_try_from_fn)]
+#![feature(iter_map_windows)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use combinations::CardCombinations;
-use itertools::Itertools;
 use rand::{Rng, thread_rng};
 use simd::{SIMD_LANES, i8s, pad};
 use std::{
     array,
     fmt::Debug,
-    mem::{Assume, MaybeUninit, TransmuteFrom, transmute},
+    mem::{Assume, MaybeUninit, TransmuteFrom},
     ops::AddAssign,
     simd::cmp::SimdPartialOrd,
     thread,
@@ -380,7 +380,6 @@ where
 
 fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
     mut player_combineds: [[Card; 7]; SIMD_LANES],
-    // TODO: Specify the length of this vec using generics
     remaining_pools: [[Card; REMAINING_POOL_SIZE]; SIMD_LANES],
     deck: &[Card],
     entire_pools: [[Card; 5]; SIMD_LANES],
@@ -390,14 +389,16 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
     let player_hands = player_hands_i8.to_array().map(Hand::from_num);
 
     for (i, remaining_pool) in remaining_pools.iter().enumerate() {
-        let other_combineds = deck
+        let filtered_deck_iter = deck
             .iter()
             .copied()
             // Filter out cards already in the pool
-            .filter(|deck_card| !remaining_pool.contains(deck_card))
-            // Get possible other hand cards
-            .tuple_combinations::<(_, _)>()
-            .map(|tuple| unsafe { transmute(tuple) })
+            .filter(|deck_card| !remaining_pool.contains(deck_card));
+        let filtered_deck: [Card; FULL_DECK_SIZE - 7] = // Full deck - (river + hand)
+            array_from_iter_exact(filtered_deck_iter).expect("Failed to create filtered deck");
+
+        // Get possible other hand cards
+        let other_combineds = CardCombinations::new(&filtered_deck)
             .map(|other_cards: [Card; 2]| {
                 array::from_fn(|index| {
                     if index < 2 {
@@ -441,13 +442,17 @@ fn compute_wins_losses<const REMAINING_POOL_SIZE: usize>(
 fn create_deck_without_present_cards<const POOL_SIZE: usize>(
     present_cards: [Card; POOL_SIZE + 2],
 ) -> Option<[Card; FULL_DECK_SIZE - 2 - POOL_SIZE]> {
-    let mut iter = (2..=14)
+    let iter = (2..=14)
         .flat_map(|value| (0..=3).map(move |color| (value, color)))
         .map(Card::from_tuple)
         .filter(|card| !present_cards.contains(card));
 
-    let deck = array::try_from_fn(|_| iter.next());
+    array_from_iter_exact(iter)
+}
+
+fn array_from_iter_exact<T, const N: usize>(mut iter: impl Iterator<Item = T>) -> Option<[T; N]> {
+    let array = array::try_from_fn(|_| iter.next());
 
     // If the iterator isnt used up
-    if iter.next().is_some() { None } else { deck }
+    if iter.next().is_some() { None } else { array }
 }

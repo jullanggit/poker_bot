@@ -1,5 +1,4 @@
 use crate::{Card, CardValue, Hand, OptInvertedColor};
-use itertools::Itertools;
 use std::{
     array,
     simd::{
@@ -214,8 +213,8 @@ pub fn highest_possible_hand(
     // TODO: See if using a .to_bitmask is better
     let is_four_of_a_kind = simd_valuess
         .iter()
-        .tuple_windows()
-        .fold(Mask::splat(false), |mask, (a, b, c, d)| {
+        .map_windows(|array| *array)
+        .fold(Mask::splat(false), |mask, [a, b, c, d]| {
             mask | (a.simd_eq(*b) & a.simd_eq(*c) & a.simd_eq(*d))
         });
 
@@ -229,8 +228,8 @@ pub fn highest_possible_hand(
     // TODO: See if using a .to_bitmask is better
     let is_three_of_a_kind = simd_valuess
         .iter()
-        .tuple_windows()
-        .fold(Mask::splat(false), |mask, (a, b, c)| {
+        .map_windows(|array| *array)
+        .fold(Mask::splat(false), |mask, [a, b, c]| {
             mask | (a.simd_eq(*b) & a.simd_eq(*c))
         });
 
@@ -238,8 +237,8 @@ pub fn highest_possible_hand(
     // Values inverted (2 pairs => -2)
     let pairs = simd_valuess
         .iter()
-        .tuple_windows()
-        .fold(i8s::splat(0), |acc, (a, b)| acc + a.simd_eq(*b).to_int());
+        .map_windows(|array| *array)
+        .fold(i8s::splat(0), |acc, [a, b]| acc + a.simd_eq(*b).to_int());
 
     // Works because four of a kind is already checked for, so one pair is in the three of a kind,
     // and the other somewhere else -> full house
